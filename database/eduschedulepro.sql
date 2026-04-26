@@ -282,16 +282,16 @@ INSERT INTO salles (code, libelle, capacite, equipements, batiment) VALUES
 -- Utilisateurs (un compte par rôle + enseignants)
 -- Mot de passe pour tous : "password123" hashé en bcrypt
 INSERT INTO utilisateurs (email, mot_de_passe_hash, role, id_lien) VALUES
-('admin@isge.bf',        '$2y$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin',        NULL),
-('mkabore@isge.bf',      '$2y$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'enseignant',   1),
-('atraore@isge.bf',      '$2y$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'enseignant',   2),
-('isawadogo@isge.bf',    '$2y$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'enseignant',   3),
-('fouedraogo@isge.bf',   '$2y$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'enseignant',   4),
-('dcompaore@isge.bf',    '$2y$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'enseignant',   5),
-('delegue.l1a@isge.bf',  '$2y$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'delegue',      1),
-('delegue.l2@isge.bf',   '$2y$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'delegue',      3),
-('surveillant@isge.bf',  '$2y$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'surveillant',  NULL),
-('comptable@isge.bf',    '$2y$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'comptable',    NULL);
+('admin@isge.bf',        '$2y$10$DPMERSAEH9pnDlNsltnl4eI9rUxNQUTM/jIPz7u3UgEtZyt5GnW9K', 'admin',        NULL),
+('mkabore@isge.bf',      '$2y$10$DPMERSAEH9pnDlNsltnl4eI9rUxNQUTM/jIPz7u3UgEtZyt5GnW9K', 'enseignant',   1),
+('atraore@isge.bf',      '$2y$10$DPMERSAEH9pnDlNsltnl4eI9rUxNQUTM/jIPz7u3UgEtZyt5GnW9K', 'enseignant',   2),
+('isawadogo@isge.bf',    '$2y$10$DPMERSAEH9pnDlNsltnl4eI9rUxNQUTM/jIPz7u3UgEtZyt5GnW9K', 'enseignant',   3),
+('fouedraogo@isge.bf',   '$2y$10$DPMERSAEH9pnDlNsltnl4eI9rUxNQUTM/jIPz7u3UgEtZyt5GnW9K', 'enseignant',   4),
+('dcompaore@isge.bf',    '$2y$10$DPMERSAEH9pnDlNsltnl4eI9rUxNQUTM/jIPz7u3UgEtZyt5GnW9K', 'enseignant',   5),
+('delegue.l1a@isge.bf',  '$2y$10$DPMERSAEH9pnDlNsltnl4eI9rUxNQUTM/jIPz7u3UgEtZyt5GnW9K', 'delegue',      1),
+('delegue.l2@isge.bf',   '$2y$10$DPMERSAEH9pnDlNsltnl4eI9rUxNQUTM/jIPz7u3UgEtZyt5GnW9K', 'delegue',      3),
+('surveillant@isge.bf',  '$2y$10$DPMERSAEH9pnDlNsltnl4eI9rUxNQUTM/jIPz7u3UgEtZyt5GnW9K', 'surveillant',  NULL),
+('comptable@isge.bf',    '$2y$10$DPMERSAEH9pnDlNsltnl4eI9rUxNQUTM/jIPz7u3UgEtZyt5GnW9K', 'comptable',    NULL);
 
 -- Emploi du temps (semaine du 28 avril 2025)
 INSERT INTO emploi_temps (id_classe, semaine_debut, statut_publication, cree_par) VALUES
