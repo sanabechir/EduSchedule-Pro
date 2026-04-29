@@ -87,12 +87,12 @@ function LoginPage() {
           </form>
 
           {/* Comptes de test */}
-          <div className="mt-4 p-3 bg-light rounded">
-            <p className="small fw-semibold mb-2">Comptes de test :</p>
-            <p className="small mb-1">👤 admin@eduschedulepro.com</p>
-            <p className="small mb-1">👤 enseignant1@eduschedulepro.com</p>
-            <p className="small mb-0">🔑 password123</p>
-          </div>
+<div className="mt-4 p-3 bg-light rounded">
+  <p className="small fw-semibold mb-2">Comptes de test :</p>
+  <p className="small mb-1">👤 admin@isge.bf</p>
+  <p className="small mb-1">👤 mkabore@isge.bf (enseignant)</p>
+  <p className="small mb-0">🔑 password123</p>
+</div>
 
         </div>
       </div>
