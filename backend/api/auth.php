@@ -1,9 +1,4 @@
 <?php
-// ============================================================
-// EduSchedule Pro — API Authentification
-// Auteur : Bechir
-// ============================================================
-
 ob_start();
 
 ini_set('display_errors', '0');
@@ -21,12 +16,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 require_once __DIR__ . '/../config/database.php';
 
-function jsonResponse($success, $message = '', $data = null, $statusCode = 200) {
+function send_json($success, $message = '', $data = null, $status = 200) {
     if (ob_get_length()) {
         ob_clean();
     }
 
-    http_response_code($statusCode);
+    http_response_code($status);
 
     echo json_encode([
         'success' => $success,
@@ -37,7 +32,7 @@ function jsonResponse($success, $message = '', $data = null, $statusCode = 200) 
     exit();
 }
 
-function getJsonBody() {
+function get_body_json() {
     $raw = file_get_contents('php://input');
 
     if (!$raw) {
@@ -47,40 +42,40 @@ function getJsonBody() {
     $data = json_decode($raw, true);
 
     if (json_last_error() !== JSON_ERROR_NONE) {
-        jsonResponse(false, 'JSON invalide', null, 400);
+        send_json(false, 'JSON invalide', null, 400);
     }
 
     return $data;
 }
 
-function generateToken($user) {
+function create_token($user) {
     $payload = [
         'id' => (int) $user['id'],
         'email' => $user['email'],
         'role' => $user['role'],
-        'exp' => time() + (24 * 60 * 60)
+        'exp' => time() + 86400
     ];
 
     return base64_encode(json_encode($payload, JSON_UNESCAPED_UNICODE));
 }
 
 try {
+    $database = new Database();
+    $conn = $database->getConnection();
+
     $action = $_GET['action'] ?? '';
 
-    $database = new Database();
-    $pdo = $database->getConnection();
-
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'login') {
-        $body = getJsonBody();
+        $body = get_body_json();
 
         $email = trim($body['email'] ?? '');
         $password = $body['password'] ?? '';
 
         if ($email === '' || $password === '') {
-            jsonResponse(false, 'Email et mot de passe obligatoires', null, 400);
+            send_json(false, 'Email et mot de passe obligatoires', null, 400);
         }
 
-        $stmt = $pdo->prepare("
+        $stmt = $conn->prepare("
             SELECT id, email, password, role
             FROM utilisateurs
             WHERE email = :email
@@ -94,18 +89,16 @@ try {
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$user) {
-            jsonResponse(false, 'Identifiants incorrects', null, 401);
+            send_json(false, 'Identifiants incorrects', null, 401);
         }
 
-        $passwordOk = password_verify($password, $user['password']);
-
-        if (!$passwordOk) {
-            jsonResponse(false, 'Identifiants incorrects', null, 401);
+        if (!password_verify($password, $user['password'])) {
+            send_json(false, 'Identifiants incorrects', null, 401);
         }
 
-        $token = generateToken($user);
+        $token = create_token($user);
 
-        jsonResponse(true, 'OK', [
+        send_json(true, 'OK', [
             'token' => $token,
             'user' => [
                 'id' => (int) $user['id'],
@@ -117,28 +110,28 @@ try {
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'me') {
         $headers = getallheaders();
-        $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+        $auth = $headers['Authorization'] ?? $headers['authorization'] ?? '';
 
-        if (!$authHeader || !str_starts_with($authHeader, 'Bearer ')) {
-            jsonResponse(false, 'Token manquant', null, 401);
+        if (!$auth || strpos($auth, 'Bearer ') !== 0) {
+            send_json(false, 'Token manquant', null, 401);
         }
 
-        $token = trim(str_replace('Bearer ', '', $authHeader));
+        $token = trim(str_replace('Bearer ', '', $auth));
         $payload = json_decode(base64_decode($token), true);
 
         if (!$payload || !isset($payload['exp']) || $payload['exp'] < time()) {
-            jsonResponse(false, 'Token invalide ou expiré', null, 401);
+            send_json(false, 'Token invalide ou expiré', null, 401);
         }
 
-        jsonResponse(true, 'OK', [
+        send_json(true, 'OK', [
             'user' => $payload
         ]);
     }
 
-    jsonResponse(false, 'Action non reconnue', null, 404);
+    send_json(false, 'Action non reconnue', null, 404);
 
 } catch (Throwable $e) {
-    jsonResponse(false, 'Erreur serveur auth.php', [
+    send_json(false, 'Erreur serveur auth.php', [
         'error' => $e->getMessage()
     ], 500);
 }
