@@ -1,202 +1,103 @@
 <?php
-// ============================================================
-//  EduSchedule Pro — API Enseignants
-//  Auteur : Bechir
-//  Endpoints : GET    /api/enseignants
-//              POST   /api/enseignants
-//              PUT    /api/enseignants/{id}
-//              DELETE /api/enseignants/{id}
-// ============================================================
+header("Content-Type: application/json");
 
-require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../utils/response.php';
 require_once __DIR__ . '/../middleware/auth.php';
 
-$db     = new Database();
-$conn   = $db->getConnection();
+$db = (new Database())->getConnection();
+$user = checkAuth(); // sécurisé
+
 $method = $_SERVER['REQUEST_METHOD'];
-$id     = $_GET['id'] ?? null;
 
-switch ($method) {
-    case 'GET':
-        Auth::proteger(['admin', 'surveillant', 'comptable']);
-        listerEnseignants($conn);
-        break;
-    case 'POST':
-        Auth::proteger(['admin']);
-        creerEnseignant($conn);
-        break;
-    case 'PUT':
-        Auth::proteger(['admin']);
-        modifierEnseignant($conn, $id);
-        break;
-    case 'DELETE':
-        Auth::proteger(['admin']);
-        supprimerEnseignant($conn, $id);
-        break;
-    default:
-        http_response_code(405);
-        echo json_encode(['success' => false, 'message' => 'Méthode non autorisée']);
-}
+try {
 
-// ============================================================
-//  LISTER les enseignants
-// ============================================================
-function listerEnseignants($conn) {
-    $specialite = $_GET['specialite'] ?? null;
-    $statut     = $_GET['statut'] ?? null;
+    // ==========================================
+    // GET → liste enseignants
+    // ==========================================
+    if ($method === "GET") {
 
-    $sql    = "SELECT * FROM enseignants WHERE actif = 1";
-    $params = [];
+        $stmt = $db->query("SELECT * FROM enseignants ORDER BY id DESC");
+        $data = $stmt->fetchAll();
 
-    if ($specialite) {
-        $sql .= " AND specialite LIKE :specialite";
-        $params[':specialite'] = "%$specialite%";
+        jsonResponse($data);
     }
 
-    if ($statut) {
-        $sql .= " AND statut = :statut";
-        $params[':statut'] = $statut;
-    }
+    // ==========================================
+    // POST → ajouter enseignant
+    // ==========================================
+    if ($method === "POST") {
 
-    $sql .= " ORDER BY nom, prenom";
+        checkAuth("admin"); // seul admin
 
-    $stmt = $conn->prepare($sql);
-    $stmt->execute($params);
-    $enseignants = $stmt->fetchAll();
+        $data = json_decode(file_get_contents("php://input"), true);
 
-    http_response_code(200);
-    echo json_encode([
-        'success' => true,
-        'data'    => $enseignants,
-        'total'   => count($enseignants)
-    ]);
-}
+        if (!isset($data["nom"]) || !isset($data["prenom"])) {
+            errorResponse("Nom et prénom requis", 400);
+        }
 
-// ============================================================
-//  CREER un enseignant
-// ============================================================
-function creerEnseignant($conn) {
-    $data = json_decode(file_get_contents('php://input'), true);
-
-    if (empty($data['nom']) || empty($data['prenom']) || empty($data['email'])) {
-        http_response_code(400);
-        echo json_encode([
-            'success' => false,
-            'message' => 'Nom, prénom et email sont requis'
-        ]);
-        return;
-    }
-
-    try {
-        // Générer matricule automatique
-        $stmt = $conn->query("SELECT COUNT(*) as total FROM enseignants");
-        $row  = $stmt->fetch();
-        $matricule = 'ENS' . str_pad($row['total'] + 1, 3, '0', STR_PAD_LEFT);
-
-        // Créer l'enseignant
-        $stmt = $conn->prepare("
-            INSERT INTO enseignants 
-                (matricule, nom, prenom, email, telephone, specialite, statut, taux_horaire)
-            VALUES 
-                (:matricule, :nom, :prenom, :email, :telephone, :specialite, :statut, :taux)
+        $stmt = $db->prepare("
+            INSERT INTO enseignants (nom, prenom, email)
+            VALUES (?, ?, ?)
         ");
+
         $stmt->execute([
-            ':matricule'  => $matricule,
-            ':nom'        => strtoupper(trim($data['nom'])),
-            ':prenom'     => ucfirst(trim($data['prenom'])),
-            ':email'      => trim($data['email']),
-            ':telephone'  => $data['telephone']   ?? null,
-            ':specialite' => $data['specialite']  ?? null,
-            ':statut'     => $data['statut']       ?? 'vacataire',
-            ':taux'       => $data['taux_horaire'] ?? 0
+            $data["nom"],
+            $data["prenom"],
+            $data["email"] ?? null
         ]);
 
-        $id_enseignant = $conn->lastInsertId();
+        jsonResponse(["id" => $db->lastInsertId()], "Enseignant ajouté");
+    }
 
-        // Créer automatiquement un compte utilisateur
-        $hash = password_hash('password123', PASSWORD_BCRYPT);
-        $stmt = $conn->prepare("
-            INSERT INTO utilisateurs (email, mot_de_passe_hash, role, id_lien)
-            VALUES (:email, :hash, 'enseignant', :id_lien)
+    // ==========================================
+    // PUT → modifier
+    // ==========================================
+    if ($method === "PUT") {
+
+        checkAuth("admin");
+
+        $data = json_decode(file_get_contents("php://input"), true);
+
+        if (!isset($data["id"])) {
+            errorResponse("ID requis", 400);
+        }
+
+        $stmt = $db->prepare("
+            UPDATE enseignants
+            SET nom = ?, prenom = ?, email = ?
+            WHERE id = ?
         ");
+
         $stmt->execute([
-            ':email'   => trim($data['email']),
-            ':hash'    => $hash,
-            ':id_lien' => $id_enseignant
+            $data["nom"],
+            $data["prenom"],
+            $data["email"] ?? null,
+            $data["id"]
         ]);
 
-        http_response_code(201);
-        echo json_encode([
-            'success'   => true,
-            'message'   => 'Enseignant créé avec succès',
-            'id'        => $id_enseignant,
-            'matricule' => $matricule
-        ]);
-
-    } catch (PDOException $e) {
-        http_response_code(409);
-        echo json_encode([
-            'success' => false,
-            'message' => 'Cet email existe déjà'
-        ]);
-    }
-}
-
-// ============================================================
-//  MODIFIER un enseignant
-// ============================================================
-function modifierEnseignant($conn, $id) {
-    if (!$id) {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'message' => 'ID requis']);
-        return;
+        jsonResponse([], "Enseignant modifié");
     }
 
-    $data = json_decode(file_get_contents('php://input'), true);
+    // ==========================================
+    // DELETE → supprimer
+    // ==========================================
+    if ($method === "DELETE") {
 
-    $stmt = $conn->prepare("
-        UPDATE enseignants 
-        SET nom = :nom, prenom = :prenom, email = :email,
-            telephone = :telephone, specialite = :specialite,
-            statut = :statut, taux_horaire = :taux
-        WHERE id = :id
-    ");
-    $stmt->execute([
-        ':nom'        => strtoupper(trim($data['nom'])),
-        ':prenom'     => ucfirst(trim($data['prenom'])),
-        ':email'      => trim($data['email']),
-        ':telephone'  => $data['telephone']   ?? null,
-        ':specialite' => $data['specialite']  ?? null,
-        ':statut'     => $data['statut']       ?? 'vacataire',
-        ':taux'       => $data['taux_horaire'] ?? 0,
-        ':id'         => $id
-    ]);
+        checkAuth("admin");
 
-    http_response_code(200);
-    echo json_encode([
-        'success' => true,
-        'message' => 'Enseignant modifié avec succès'
-    ]);
-}
+        $data = json_decode(file_get_contents("php://input"), true);
 
-// ============================================================
-//  SUPPRIMER un enseignant (désactivation)
-// ============================================================
-function supprimerEnseignant($conn, $id) {
-    if (!$id) {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'message' => 'ID requis']);
-        return;
+        if (!isset($data["id"])) {
+            errorResponse("ID requis", 400);
+        }
+
+        $stmt = $db->prepare("DELETE FROM enseignants WHERE id = ?");
+        $stmt->execute([$data["id"]]);
+
+        jsonResponse([], "Enseignant supprimé");
     }
 
-    // Désactivation au lieu de suppression physique
-    $stmt = $conn->prepare("UPDATE enseignants SET actif = 0 WHERE id = :id");
-    $stmt->execute([':id' => $id]);
-
-    http_response_code(200);
-    echo json_encode([
-        'success' => true,
-        'message' => 'Enseignant désactivé avec succès'
-    ]);
+} catch (Exception $e) {
+    errorResponse($e->getMessage(), 500);
 }

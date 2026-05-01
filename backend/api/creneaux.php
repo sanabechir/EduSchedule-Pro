@@ -1,216 +1,140 @@
 <?php
-// ============================================================
-//  EduSchedule Pro — API Créneaux & QR-Code
-//  Auteur : Bechir
-//  Endpoints : GET  /api/creneaux
-//              GET  /api/creneaux?id={id}&action=qr
-//              POST /api/creneaux
-//              DELETE /api/creneaux/{id}
-// ============================================================
+header("Content-Type: application/json");
 
-require_once __DIR__ . '/../../vendor/autoload.php';
-require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../utils/response.php';
 require_once __DIR__ . '/../middleware/auth.php';
 
-use chillerlan\QRCode\QRCode;
-use chillerlan\QRCode\QROptions;
+$db = (new Database())->getConnection();
+$user = checkAuth();
 
-$db     = new Database();
-$conn   = $db->getConnection();
 $method = $_SERVER['REQUEST_METHOD'];
-$id     = $_GET['id']     ?? null;
-$action = $_GET['action'] ?? null;
 
-switch ($method) {
-    case 'GET':
-        Auth::proteger(['admin', 'enseignant', 'delegue', 'surveillant', 'etudiant']);
-        if ($id && $action === 'qr') genererQR($conn, $id);
-        else listerCreneaux($conn);
-        break;
-    case 'POST':
-        Auth::proteger(['admin']);
-        creerCreneau($conn);
-        break;
-    case 'DELETE':
-        Auth::proteger(['admin']);
-        supprimerCreneau($conn, $id);
-        break;
-    default:
-        http_response_code(405);
-        echo json_encode(['success' => false, 'message' => 'Méthode non autorisée']);
+// 🔥 Fonction vérification existence
+function exists($db, $table, $id) {
+    $stmt = $db->prepare("SELECT id FROM $table WHERE id = ?");
+    $stmt->execute([$id]);
+    return $stmt->fetch();
 }
 
-// ============================================================
-//  LISTER les créneaux
-// ============================================================
-function listerCreneaux($conn) {
-    $id_emploi = $_GET['id_emploi_temps'] ?? null;
-    $id_classe  = $_GET['id_classe']       ?? null;
+try {
 
-    $sql = "
-        SELECT 
-            cr.*,
-            m.libelle  AS matiere_libelle,
-            m.code     AS matiere_code,
-            e.nom      AS enseignant_nom,
-            e.prenom   AS enseignant_prenom,
-            s.libelle  AS salle_libelle,
-            s.code     AS salle_code
-        FROM creneaux    cr
-        JOIN matieres    m  ON cr.id_matiere    = m.id
-        JOIN enseignants e  ON cr.id_enseignant = e.id
-        JOIN salles      s  ON cr.id_salle      = s.id
-        WHERE 1=1
-    ";
-    $params = [];
+    // ==========================================
+    // GET → LISTE PROPRE
+    // ==========================================
+    if ($method === "GET") {
 
-    if ($id_emploi) {
-        $sql .= " AND cr.id_emploi_temps = :id_emploi";
-        $params[':id_emploi'] = $id_emploi;
-    }
-
-    $sql .= " ORDER BY FIELD(cr.jour,'Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'), cr.heure_debut";
-
-    $stmt = $conn->prepare($sql);
-    $stmt->execute($params);
-    $creneaux = $stmt->fetchAll();
-
-    http_response_code(200);
-    echo json_encode([
-        'success' => true,
-        'data'    => $creneaux,
-        'total'   => count($creneaux)
-    ]);
-}
-
-// ============================================================
-//  CREER un créneau
-// ============================================================
-function creerCreneau($conn) {
-    $data = json_decode(file_get_contents('php://input'), true);
-
-    $requis = ['id_emploi_temps', 'id_matiere', 'id_enseignant', 'id_salle', 'jour', 'heure_debut', 'heure_fin'];
-    foreach ($requis as $champ) {
-        if (empty($data[$champ])) {
-            http_response_code(400);
-            echo json_encode(['success' => false, 'message' => "Champ requis : $champ"]);
-            return;
-        }
-    }
-
-    try {
-        $stmt = $conn->prepare("
-            INSERT INTO creneaux 
-                (id_emploi_temps, id_matiere, id_enseignant, id_salle, jour, heure_debut, heure_fin)
-            VALUES 
-                (:id_emploi, :id_matiere, :id_enseignant, :id_salle, :jour, :heure_debut, :heure_fin)
+        $stmt = $db->query("
+            SELECT 
+                c.id,
+                cl.nom AS classe,
+                m.nom AS matiere,
+                CONCAT(e.nom, ' ', e.prenom) AS enseignant,
+                s.nom AS salle,
+                c.jour,
+                h.label AS horaire,
+                c.type,
+                c.groupe
+            FROM creneaux c
+            LEFT JOIN classes cl ON c.classe_id = cl.id
+            LEFT JOIN matieres m ON c.matiere_id = m.id
+            LEFT JOIN enseignants e ON c.enseignant_id = e.id
+            LEFT JOIN salles s ON c.salle_id = s.id
+            LEFT JOIN horaires h ON c.horaire_id = h.id
+            ORDER BY 
+                FIELD(c.jour, 'Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'),
+                h.id
         ");
+
+        jsonResponse($stmt->fetchAll());
+    }
+
+    // ==========================================
+    // POST → VERSION PRO
+    // ==========================================
+    if ($method === "POST") {
+
+        checkAuth("admin");
+
+        $data = json_decode(file_get_contents("php://input"), true);
+
+        $required = ["classe_id","matiere_id","enseignant_id","salle_id","jour","horaire_id"];
+
+        foreach ($required as $field) {
+            if (!isset($data[$field])) {
+                errorResponse("Champ manquant: $field", 400);
+            }
+        }
+
+        // 🔥 normalisation jour
+        $data["jour"] = ucfirst(strtolower(trim($data["jour"])));
+
+        // 🔥 vérification existence
+        if (!exists($db, "classes", $data["classe_id"])) errorResponse("Classe invalide");
+        if (!exists($db, "matieres", $data["matiere_id"])) errorResponse("Matière invalide");
+        if (!exists($db, "enseignants", $data["enseignant_id"])) errorResponse("Enseignant invalide");
+        if (!exists($db, "salles", $data["salle_id"])) errorResponse("Salle invalide");
+
+        // 🔥 conflit salle
+        $checkSalle = $db->prepare("
+            SELECT id FROM creneaux 
+            WHERE salle_id = ? AND jour = ? AND horaire_id = ?
+        ");
+        $checkSalle->execute([$data["salle_id"], $data["jour"], $data["horaire_id"]]);
+
+        if ($checkSalle->fetch()) {
+            errorResponse("Salle déjà occupée", 400);
+        }
+
+        // 🔥 conflit enseignant
+        $checkProf = $db->prepare("
+            SELECT id FROM creneaux 
+            WHERE enseignant_id = ? AND jour = ? AND horaire_id = ?
+        ");
+        $checkProf->execute([$data["enseignant_id"], $data["jour"], $data["horaire_id"]]);
+
+        if ($checkProf->fetch()) {
+            errorResponse("Enseignant déjà occupé", 400);
+        }
+
+        // 🔥 insertion
+        $stmt = $db->prepare("
+            INSERT INTO creneaux 
+            (classe_id, matiere_id, enseignant_id, salle_id, jour, horaire_id, type, groupe)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ");
+
         $stmt->execute([
-            ':id_emploi'     => $data['id_emploi_temps'],
-            ':id_matiere'    => $data['id_matiere'],
-            ':id_enseignant' => $data['id_enseignant'],
-            ':id_salle'      => $data['id_salle'],
-            ':jour'          => $data['jour'],
-            ':heure_debut'   => $data['heure_debut'],
-            ':heure_fin'     => $data['heure_fin']
+            $data["classe_id"],
+            $data["matiere_id"],
+            $data["enseignant_id"],
+            $data["salle_id"],
+            $data["jour"],
+            $data["horaire_id"],
+            $data["type"] ?? "cours",
+            $data["groupe"] ?? null
         ]);
 
-        $id_creneau = $conn->lastInsertId();
-
-        http_response_code(201);
-        echo json_encode([
-            'success' => true,
-            'message' => 'Créneau créé avec succès',
-            'id'      => $id_creneau
-        ]);
-
-    } catch (PDOException $e) {
-        http_response_code(500);
-        echo json_encode(['success' => false, 'message' => 'Erreur lors de la création']);
-    }
-}
-
-// ============================================================
-//  GENERER le QR-Code d'un créneau
-// ============================================================
-function genererQR($conn, $id) {
-    $stmt = $conn->prepare("
-        SELECT cr.*, m.libelle AS matiere, e.nom AS enseignant_nom, 
-               e.prenom AS enseignant_prenom, s.libelle AS salle,
-               et.semaine_debut
-        FROM creneaux cr
-        JOIN matieres m    ON cr.id_matiere    = m.id
-        JOIN enseignants e ON cr.id_enseignant = e.id
-        JOIN salles s      ON cr.id_salle      = s.id
-        JOIN emploi_temps et ON cr.id_emploi_temps = et.id
-        WHERE cr.id = :id
-    ");
-    $stmt->execute([':id' => $id]);
-    $creneau = $stmt->fetch();
-
-    if (!$creneau) {
-        http_response_code(404);
-        echo json_encode(['success' => false, 'message' => 'Créneau non trouvé']);
-        return;
+        jsonResponse(["id"=>$db->lastInsertId()], "Créneau ajouté");
     }
 
-    // Générer token unique
-    $token = hash_hmac('sha256', $id . $creneau['jour'] . $creneau['heure_debut'], JWT_SECRET);
+    // ==========================================
+    // DELETE
+    // ==========================================
+    if ($method === "DELETE") {
 
-    // Sauvegarder le token en base
-    $stmt = $conn->prepare("
-        UPDATE creneaux SET qr_token = :token WHERE id = :id
-    ");
-    $stmt->execute([':token' => $token, ':id' => $id]);
+        checkAuth("admin");
 
-    // Données encodées dans le QR
-    $qr_data = json_encode([
-        'token'      => $token,
-        'id_creneau' => (int)$id,
-        'matiere'    => $creneau['matiere'],
-        'salle'      => $creneau['salle'],
-        'jour'       => $creneau['jour'],
-        'heure'      => $creneau['heure_debut']
-    ]);
+        $data = json_decode(file_get_contents("php://input"), true);
 
-    // Générer QR-Code SVG
-    $options = new QROptions([
-        'outputType' => 'svg',
-        'eccLevel'   => 'H',
-    ]);
+        if (!isset($data["id"])) errorResponse("ID requis");
 
-    $qrcode = (new QRCode($options))->render($qr_data);
+        $stmt = $db->prepare("DELETE FROM creneaux WHERE id = ?");
+        $stmt->execute([$data["id"]]);
 
-    http_response_code(200);
-    echo json_encode([
-        'success' => true,
-        'token'   => $token,
-        'qr_svg'  => $qrcode,
-        'creneau' => [
-            'matiere'     => $creneau['matiere'],
-            'enseignant'  => $creneau['enseignant_prenom'] . ' ' . $creneau['enseignant_nom'],
-            'salle'       => $creneau['salle'],
-            'jour'        => $creneau['jour'],
-            'heure_debut' => $creneau['heure_debut'],
-            'heure_fin'   => $creneau['heure_fin']
-        ]
-    ]);
-}
-
-// ============================================================
-//  SUPPRIMER un créneau
-// ============================================================
-function supprimerCreneau($conn, $id) {
-    if (!$id) {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'message' => 'ID requis']);
-        return;
+        jsonResponse([], "Créneau supprimé");
     }
 
-    $stmt = $conn->prepare("DELETE FROM creneaux WHERE id = :id");
-    $stmt->execute([':id' => $id]);
-
-    http_response_code(200);
-    echo json_encode(['success' => true, 'message' => 'Créneau supprimé avec succès']);
+} catch (Exception $e) {
+    errorResponse($e->getMessage(), 500);
 }

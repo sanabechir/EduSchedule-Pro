@@ -1,160 +1,85 @@
 <?php
-// ============================================================
-//  EduSchedule Pro — API Classes
-//  Auteur : Bechir
-//  Endpoints : GET    /api/classes
-//              POST   /api/classes
-//              PUT    /api/classes/{id}
-//              DELETE /api/classes/{id}
-// ============================================================
+header("Content-Type: application/json");
 
-require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../utils/response.php';
 require_once __DIR__ . '/../middleware/auth.php';
 
-$db     = new Database();
-$conn   = $db->getConnection();
+$db = (new Database())->getConnection();
+$user = checkAuth();
+
 $method = $_SERVER['REQUEST_METHOD'];
-$id     = $_GET['id'] ?? null;
 
-switch ($method) {
-    case 'GET':
-        listerClasses($conn);
-        break;
-    case 'POST':
-        Auth::proteger(['admin']);
-        creerClasse($conn);
-        break;
-    case 'PUT':
-        Auth::proteger(['admin']);
-        modifierClasse($conn, $id);
-        break;
-    case 'DELETE':
-        Auth::proteger(['admin']);
-        supprimerClasse($conn, $id);
-        break;
-    default:
-        http_response_code(405);
-        echo json_encode(['success' => false, 'message' => 'Méthode non autorisée']);
-}
+try {
 
-// ============================================================
-//  LISTER toutes les classes
-// ============================================================
-function listerClasses($conn) {
-    $annee = $_GET['annee'] ?? null;
+    // ===============================
+    // GET → liste classes
+    // ===============================
+    if ($method === "GET") {
 
-    $sql = "SELECT * FROM classes";
-    $params = [];
+        $stmt = $db->query("SELECT * FROM classes ORDER BY id DESC");
+        $data = $stmt->fetchAll();
 
-    if ($annee) {
-        $sql .= " WHERE annee_academique = :annee";
-        $params[':annee'] = $annee;
+        jsonResponse($data);
     }
 
-    $sql .= " ORDER BY niveau, code";
+    // ===============================
+    // POST → ajouter classe
+    // ===============================
+    if ($method === "POST") {
 
-    $stmt = $conn->prepare($sql);
-    $stmt->execute($params);
-    $classes = $stmt->fetchAll();
+        checkAuth("admin");
 
-    http_response_code(200);
-    echo json_encode([
-        'success' => true,
-        'data'    => $classes,
-        'total'   => count($classes)
-    ]);
-}
+        $data = json_decode(file_get_contents("php://input"), true);
 
-// ============================================================
-//  CREER une classe
-// ============================================================
-function creerClasse($conn) {
-    $data = json_decode(file_get_contents('php://input'), true);
+        if (!isset($data["nom"])) {
+            errorResponse("Nom requis", 400);
+        }
 
-    if (empty($data['code']) || empty($data['libelle']) || empty($data['niveau'])) {
-        http_response_code(400);
-        echo json_encode([
-            'success' => false,
-            'message' => 'Code, libellé et niveau sont requis'
-        ]);
-        return;
+        $stmt = $db->prepare("INSERT INTO classes (nom) VALUES (?)");
+        $stmt->execute([$data["nom"]]);
+
+        jsonResponse(["id" => $db->lastInsertId()], "Classe ajoutée");
     }
 
-    try {
-        $stmt = $conn->prepare("
-            INSERT INTO classes (code, libelle, niveau, annee_academique)
-            VALUES (:code, :libelle, :niveau, :annee)
-        ");
-        $stmt->execute([
-            ':code'    => strtoupper(trim($data['code'])),
-            ':libelle' => trim($data['libelle']),
-            ':niveau'  => $data['niveau'],
-            ':annee'   => $data['annee_academique'] ?? '2025-2026'
-        ]);
+    // ===============================
+    // PUT → modifier
+    // ===============================
+    if ($method === "PUT") {
 
-        http_response_code(201);
-        echo json_encode([
-            'success' => true,
-            'message' => 'Classe créée avec succès',
-            'id'      => $conn->lastInsertId()
-        ]);
-    } catch (PDOException $e) {
-        http_response_code(409);
-        echo json_encode([
-            'success' => false,
-            'message' => 'Ce code de classe existe déjà'
-        ]);
-    }
-}
+        checkAuth("admin");
 
-// ============================================================
-//  MODIFIER une classe
-// ============================================================
-function modifierClasse($conn, $id) {
-    if (!$id) {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'message' => 'ID requis']);
-        return;
+        $data = json_decode(file_get_contents("php://input"), true);
+
+        if (!isset($data["id"])) {
+            errorResponse("ID requis", 400);
+        }
+
+        $stmt = $db->prepare("UPDATE classes SET nom = ? WHERE id = ?");
+        $stmt->execute([$data["nom"], $data["id"]]);
+
+        jsonResponse([], "Classe modifiée");
     }
 
-    $data = json_decode(file_get_contents('php://input'), true);
+    // ===============================
+    // DELETE → supprimer
+    // ===============================
+    if ($method === "DELETE") {
 
-    $stmt = $conn->prepare("
-        UPDATE classes 
-        SET code = :code, libelle = :libelle, niveau = :niveau
-        WHERE id = :id
-    ");
-    $stmt->execute([
-        ':code'    => strtoupper(trim($data['code'])),
-        ':libelle' => trim($data['libelle']),
-        ':niveau'  => $data['niveau'],
-        ':id'      => $id
-    ]);
+        checkAuth("admin");
 
-    http_response_code(200);
-    echo json_encode([
-        'success' => true,
-        'message' => 'Classe modifiée avec succès'
-    ]);
-}
+        $data = json_decode(file_get_contents("php://input"), true);
 
-// ============================================================
-//  SUPPRIMER une classe
-// ============================================================
-function supprimerClasse($conn, $id) {
-    if (!$id) {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'message' => 'ID requis']);
-        return;
+        if (!isset($data["id"])) {
+            errorResponse("ID requis", 400);
+        }
+
+        $stmt = $db->prepare("DELETE FROM classes WHERE id = ?");
+        $stmt->execute([$data["id"]]);
+
+        jsonResponse([], "Classe supprimée");
     }
 
-    $stmt = $conn->prepare("DELETE FROM classes WHERE id = :id");
-    $stmt->execute([':id' => $id]);
-
-    http_response_code(200);
-    echo json_encode([
-        'success' => true,
-        'message' => 'Classe supprimée avec succès'
-    ]);
+} catch (Exception $e) {
+    errorResponse($e->getMessage(), 500);
 }

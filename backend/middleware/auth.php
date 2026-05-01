@@ -1,115 +1,28 @@
 <?php
-// ============================================================
-//  EduSchedule Pro — Middleware Authentification JWT
-//  Auteur : Bechir
-// ============================================================
+// ======================================================
+//  Middleware d'authentification
+// ======================================================
 
-require_once __DIR__ . '/../config/config.php';
+require_once __DIR__ . '/../utils/jwt.php';
+require_once __DIR__ . '/../utils/response.php';
 
-class Auth {
+/**
+ * Vérifie si l'utilisateur est connecté
+ * et optionnellement son rôle
+ */
+function checkAuth($requiredRole = null) {
 
-    // Générer un token JWT
-    public static function genererToken($payload) {
-        $header = base64_encode(json_encode([
-            'alg' => 'HS256',
-            'typ' => 'JWT'
-        ]));
+    // 🔐 Vérifier le token
+    $user = verifyToken();
 
-        $payload['iat'] = time();
-        $payload['exp'] = time() + JWT_EXPIRATION;
-
-        $payload_encode = base64_encode(json_encode($payload));
-
-        $signature = hash_hmac(
-            'sha256',
-            "$header.$payload_encode",
-            JWT_SECRET,
-            true
-        );
-        $signature = base64_encode($signature);
-
-        return "$header.$payload_encode.$signature";
+    if (!$user) {
+        errorResponse("Accès non autorisé (token invalide ou expiré)", 401);
     }
 
-    // Vérifier et décoder un token JWT
-    public static function verifierToken($token) {
-        $parties = explode('.', $token);
-
-        if (count($parties) !== 3) {
-            return null;
-        }
-
-        [$header, $payload, $signature] = $parties;
-
-        // Vérifier la signature
-        $signature_valide = base64_encode(
-            hash_hmac('sha256', "$header.$payload", JWT_SECRET, true)
-        );
-
-        if ($signature !== $signature_valide) {
-            return null;
-        }
-
-        // Décoder le payload
-        $data = json_decode(base64_decode($payload), true);
-
-        // Vérifier expiration
-        if (!isset($data['exp']) || $data['exp'] < time()) {
-            return null;
-        }
-
-        return $data;
+    // 🔥 Vérifier le rôle si nécessaire
+    if ($requiredRole !== null && $user["role"] !== $requiredRole) {
+        errorResponse("Accès refusé (rôle insuffisant)", 403);
     }
 
-    // Extraire le token du header Authorization
-    public static function getTokenDepuisHeader() {
-        $headers = getallheaders();
-        if (!isset($headers['Authorization'])) {
-            return null;
-        }
-
-        $auth = $headers['Authorization'];
-        if (!str_starts_with($auth, 'Bearer ')) {
-            return null;
-        }
-
-        return substr($auth, 7);
-    }
-
-    // Protéger une route — retourne les données utilisateur ou bloque
-    public static function proteger($roles_autorises = []) {
-        $token = self::getTokenDepuisHeader();
-
-        if (!$token) {
-            http_response_code(401);
-            echo json_encode([
-                'success' => false,
-                'message' => 'Token manquant — accès refusé'
-            ]);
-            exit();
-        }
-
-        $data = self::verifierToken($token);
-
-        if (!$data) {
-            http_response_code(401);
-            echo json_encode([
-                'success' => false,
-                'message' => 'Token invalide ou expiré'
-            ]);
-            exit();
-        }
-
-        // Vérifier le rôle si spécifié
-        if (!empty($roles_autorises) && !in_array($data['role'], $roles_autorises)) {
-            http_response_code(403);
-            echo json_encode([
-                'success' => false,
-                'message' => 'Accès interdit — rôle insuffisant'
-            ]);
-            exit();
-        }
-
-        return $data;
-    }
+    return $user;
 }

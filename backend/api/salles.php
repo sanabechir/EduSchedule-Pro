@@ -1,138 +1,85 @@
 <?php
-// ============================================================
-//  EduSchedule Pro — API Salles
-//  Auteur : Bechir
-//  Endpoints : GET    /api/salles
-//              POST   /api/salles
-//              PUT    /api/salles/{id}
-//              DELETE /api/salles/{id}
-// ============================================================
+header("Content-Type: application/json");
 
-require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../utils/response.php';
 require_once __DIR__ . '/../middleware/auth.php';
 
-$db     = new Database();
-$conn   = $db->getConnection();
+$db = (new Database())->getConnection();
+$user = checkAuth();
+
 $method = $_SERVER['REQUEST_METHOD'];
-$id     = $_GET['id'] ?? null;
 
-switch ($method) {
-    case 'GET':
-        listerSalles($conn);
-        break;
-    case 'POST':
-        Auth::proteger(['admin']);
-        creerSalle($conn);
-        break;
-    case 'PUT':
-        Auth::proteger(['admin']);
-        modifierSalle($conn, $id);
-        break;
-    case 'DELETE':
-        Auth::proteger(['admin']);
-        supprimerSalle($conn, $id);
-        break;
-    default:
-        http_response_code(405);
-        echo json_encode(['success' => false, 'message' => 'Méthode non autorisée']);
-}
+try {
 
-function listerSalles($conn) {
-    $disponible = $_GET['disponible'] ?? null;
+    // ===============================
+    // GET → liste salles
+    // ===============================
+    if ($method === "GET") {
 
-    $sql    = "SELECT * FROM salles";
-    $params = [];
+        $stmt = $db->query("SELECT * FROM salles ORDER BY id DESC");
+        $data = $stmt->fetchAll();
 
-    if ($disponible !== null) {
-        $sql .= " WHERE disponible = :disponible";
-        $params[':disponible'] = $disponible;
+        jsonResponse($data);
     }
 
-    $sql .= " ORDER BY code";
+    // ===============================
+    // POST → ajouter salle
+    // ===============================
+    if ($method === "POST") {
 
-    $stmt = $conn->prepare($sql);
-    $stmt->execute($params);
-    $salles = $stmt->fetchAll();
+        checkAuth("admin");
 
-    http_response_code(200);
-    echo json_encode([
-        'success' => true,
-        'data'    => $salles,
-        'total'   => count($salles)
-    ]);
-}
+        $data = json_decode(file_get_contents("php://input"), true);
 
-function creerSalle($conn) {
-    $data = json_decode(file_get_contents('php://input'), true);
+        if (!isset($data["nom"])) {
+            errorResponse("Nom requis", 400);
+        }
 
-    if (empty($data['code']) || empty($data['libelle'])) {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'message' => 'Code et libellé requis']);
-        return;
+        $stmt = $db->prepare("INSERT INTO salles (nom) VALUES (?)");
+        $stmt->execute([$data["nom"]]);
+
+        jsonResponse(["id" => $db->lastInsertId()], "Salle ajoutée");
     }
 
-    try {
-        $stmt = $conn->prepare("
-            INSERT INTO salles (code, libelle, capacite, equipements, batiment)
-            VALUES (:code, :libelle, :capacite, :equipements, :batiment)
-        ");
-        $stmt->execute([
-            ':code'        => strtoupper(trim($data['code'])),
-            ':libelle'     => trim($data['libelle']),
-            ':capacite'    => $data['capacite']    ?? 30,
-            ':equipements' => $data['equipements'] ?? null,
-            ':batiment'    => $data['batiment']    ?? null
-        ]);
+    // ===============================
+    // PUT → modifier
+    // ===============================
+    if ($method === "PUT") {
 
-        http_response_code(201);
-        echo json_encode([
-            'success' => true,
-            'message' => 'Salle créée avec succès',
-            'id'      => $conn->lastInsertId()
-        ]);
-    } catch (PDOException $e) {
-        http_response_code(409);
-        echo json_encode(['success' => false, 'message' => 'Ce code salle existe déjà']);
-    }
-}
+        checkAuth("admin");
 
-function modifierSalle($conn, $id) {
-    if (!$id) {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'message' => 'ID requis']);
-        return;
+        $data = json_decode(file_get_contents("php://input"), true);
+
+        if (!isset($data["id"])) {
+            errorResponse("ID requis", 400);
+        }
+
+        $stmt = $db->prepare("UPDATE salles SET nom = ? WHERE id = ?");
+        $stmt->execute([$data["nom"], $data["id"]]);
+
+        jsonResponse([], "Salle modifiée");
     }
 
-    $data = json_decode(file_get_contents('php://input'), true);
-    $stmt = $conn->prepare("
-        UPDATE salles 
-        SET code = :code, libelle = :libelle, capacite = :capacite,
-            equipements = :equipements, batiment = :batiment
-        WHERE id = :id
-    ");
-    $stmt->execute([
-        ':code'        => strtoupper(trim($data['code'])),
-        ':libelle'     => trim($data['libelle']),
-        ':capacite'    => $data['capacite']    ?? 30,
-        ':equipements' => $data['equipements'] ?? null,
-        ':batiment'    => $data['batiment']    ?? null,
-        ':id'          => $id
-    ]);
+    // ===============================
+    // DELETE → supprimer
+    // ===============================
+    if ($method === "DELETE") {
 
-    http_response_code(200);
-    echo json_encode(['success' => true, 'message' => 'Salle modifiée avec succès']);
-}
+        checkAuth("admin");
 
-function supprimerSalle($conn, $id) {
-    if (!$id) {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'message' => 'ID requis']);
-        return;
+        $data = json_decode(file_get_contents("php://input"), true);
+
+        if (!isset($data["id"])) {
+            errorResponse("ID requis", 400);
+        }
+
+        $stmt = $db->prepare("DELETE FROM salles WHERE id = ?");
+        $stmt->execute([$data["id"]]);
+
+        jsonResponse([], "Salle supprimée");
     }
 
-    $stmt = $conn->prepare("UPDATE salles SET disponible = 0 WHERE id = :id");
-    $stmt->execute([':id' => $id]);
-    http_response_code(200);
-    echo json_encode(['success' => true, 'message' => 'Salle désactivée avec succès']);
+} catch (Exception $e) {
+    errorResponse($e->getMessage(), 500);
 }

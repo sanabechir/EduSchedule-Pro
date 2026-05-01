@@ -1,136 +1,59 @@
 <?php
-// ============================================================
-//  EduSchedule Pro — API Authentification
-//  Auteur : Bechir
-//  Endpoints : POST /api/auth/login
-//              POST /api/auth/logout
-// ============================================================
+// ======================================================
+//  Authentification (LOGIN)
+// ======================================================
 
-require_once __DIR__ . '/../config/config.php';
+header("Content-Type: application/json");
+
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../middleware/auth.php';
+require_once __DIR__ . '/../utils/response.php';
+require_once __DIR__ . '/../utils/jwt.php';
 
-$db     = new Database();
-$conn   = $db->getConnection();
-$method = $_SERVER['REQUEST_METHOD'];
-$action = $_GET['action'] ?? '';
+$db = (new Database())->getConnection();
 
-switch ($method) {
-    case 'POST':
-        if ($action === 'login')  login($conn);
-        if ($action === 'logout') logout();
-        break;
-    default:
-        http_response_code(405);
-        echo json_encode(['success' => false, 'message' => 'Méthode non autorisée']);
+// Récupération des données
+$data = json_decode(file_get_contents("php://input"), true);
+
+// 🔒 Vérification des champs
+if (!isset($data["email"]) || !isset($data["password"])) {
+    errorResponse("Email et mot de passe requis", 400);
 }
 
-// ============================================================
-//  LOGIN
-// ============================================================
-function login($conn) {
-    $data = json_decode(file_get_contents('php://input'), true);
+$email = $data["email"];
+$password = $data["password"];
 
-    // Validation des champs
-    if (empty($data['email']) || empty($data['password'])) {
-        http_response_code(400);
-        echo json_encode([
-            'success' => false,
-            'message' => 'Email et mot de passe requis'
-        ]);
-        return;
+try {
+
+    // 🔍 Recherche utilisateur
+    $stmt = $db->prepare("SELECT * FROM utilisateurs WHERE email = ?");
+    $stmt->execute([$email]);
+
+    $user = $stmt->fetch();
+
+    // ❌ Utilisateur non trouvé
+    if (!$user) {
+        errorResponse("Utilisateur introuvable", 404);
     }
 
-    // Chercher l'utilisateur
-    $stmt = $conn->prepare("
-        SELECT u.*, 
-               CASE 
-                 WHEN u.role = 'enseignant' THEN e.nom
-                 ELSE NULL 
-               END AS nom_enseignant,
-               CASE 
-                 WHEN u.role = 'enseignant' THEN e.prenom
-                 ELSE NULL 
-               END AS prenom_enseignant
-        FROM utilisateurs u
-        LEFT JOIN enseignants e ON u.id_lien = e.id AND u.role = 'enseignant'
-        WHERE u.email = :email AND u.actif = 1
-    ");
-    $stmt->execute([':email' => $data['email']]);
-    $utilisateur = $stmt->fetch();
-
-    // Vérifier mot de passe
-    if (!$utilisateur || !password_verify($data['password'], $utilisateur['mot_de_passe_hash'])) {
-        http_response_code(401);
-        echo json_encode([
-            'success' => false,
-            'message' => 'Email ou mot de passe incorrect'
-        ]);
-        return;
+    // ❌ Mot de passe incorrect
+    if (!password_verify($password, $user["password"])) {
+        errorResponse("Mot de passe incorrect", 401);
     }
 
-    // Générer le token JWT
-    $token = Auth::genererToken([
-        'id'      => $utilisateur['id'],
-        'email'   => $utilisateur['email'],
-        'role'    => $utilisateur['role'],
-        'id_lien' => $utilisateur['id_lien']
-    ]);
+    // ✅ Génération du token
+    $token = generateToken($user);
 
-    // Mettre à jour la dernière connexion
-    $stmt = $conn->prepare("
-        UPDATE utilisateurs 
-        SET derniere_connexion = NOW() 
-        WHERE id = :id
-    ");
-    $stmt->execute([':id' => $utilisateur['id']]);
-
-    // Logger l'action
-    $stmt = $conn->prepare("
-        INSERT INTO logs_activite (id_utilisateur, action, ip) 
-        VALUES (:id, 'LOGIN', :ip)
-    ");
-    $stmt->execute([
-        ':id' => $utilisateur['id'],
-        ':ip' => $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'
-    ]);
-
-    // Réponse succès
-    http_response_code(200);
-    echo json_encode([
-        'success' => true,
-        'message' => 'Connexion réussie',
-        'token'   => $token,
-        'user'    => [
-            'id'     => $utilisateur['id'],
-            'email'  => $utilisateur['email'],
-            'role'   => $utilisateur['role'],
-            'nom'    => $utilisateur['nom_enseignant'],
-            'prenom' => $utilisateur['prenom_enseignant']
+    // 🎯 Réponse
+    jsonResponse([
+        "token" => $token,
+        "user" => [
+            "id"    => $user["id"],
+            "email" => $user["email"],
+            "role"  => $user["role"]
         ]
-    ]);
-}
+    ], "Connexion réussie");
 
-// ============================================================
-//  LOGOUT
-// ============================================================
-function logout() {
-    $utilisateur = Auth::proteger();
+} catch (Exception $e) {
 
-    // Logger la déconnexion
-    global $conn;
-    $stmt = $conn->prepare("
-        INSERT INTO logs_activite (id_utilisateur, action, ip) 
-        VALUES (:id, 'LOGOUT', :ip)
-    ");
-    $stmt->execute([
-        ':id' => $utilisateur['id'],
-        ':ip' => $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'
-    ]);
-
-    http_response_code(200);
-    echo json_encode([
-        'success' => true,
-        'message' => 'Déconnexion réussie'
-    ]);
+    errorResponse("Erreur serveur", 500);
 }
