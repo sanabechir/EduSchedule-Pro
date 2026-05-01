@@ -65,7 +65,7 @@ function LoginPage({ onLoginSuccess }) {
     setError('')
 
     try {
-      const res = await fetch(`${API_BASE}/auth.php?action=login`, {
+      const res = await fetch(`${API_BASE}/auth_clean.php?action=login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
