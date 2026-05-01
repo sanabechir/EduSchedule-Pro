@@ -21,10 +21,11 @@ function EmploiTempsPage() {
   const jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi']
 
   const plagesHoraires = [
-    { label: '7h30',  sublabel: 'à', label2: '9h30',  debutMin: 450, finMin: 570 },
-    { label: '10h',   sublabel: 'à', label2: '12h15', debutMin: 600, finMin: 735 },
-    { label: '15h',   sublabel: 'à', label2: '18h',   debutMin: 900, finMin: 1080 },
-  ]
+  { label: '7h30',  sublabel: 'à', label2: '9h30',  debutMin: 450, finMin: 570 },
+  { label: '10h',   sublabel: 'à', label2: '12h15', debutMin: 600, finMin: 735 },
+  { label: '13h',   sublabel: 'à', label2: '15h',   debutMin: 780, finMin: 900 },
+  { label: '15h',   sublabel: 'à', label2: '18h',   debutMin: 900, finMin: 1080 },
+]
 
   useEffect(() => { fetchClasses() }, [])
   useEffect(() => { if (classeId) fetchEmplois() }, [classeId])
