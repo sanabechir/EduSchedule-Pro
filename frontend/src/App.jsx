@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import PointageQRCode from './pages/PointageQRCode.jsx'
+import EmploiTempsISGE from './pages/EmploiTempsISGE.jsx'
 
 const API_BASE = 'http://localhost/EduSchedule-Pro/backend/api'
 
@@ -40,8 +42,8 @@ function App() {
       onLogout={logout}
     >
       {page === 'dashboard' && <DashboardRouter token={token} user={user} />}
-      {page === 'emploi' && <EmploiTempsPage token={token} />}
-      {page === 'qr' && <PointagePage user={user} />}
+      {page === 'emploi' && <EmploiTempsISGE token={token} />}
+      {page === 'qr' && <PointageQRCode user={user} />}
       {page === 'cahier' && <CahierPage user={user} />}
       {page === 'vacations' && <VacationsPage user={user} />}
       {page === 'rapports' && <RapportsPage user={user} />}
@@ -244,6 +246,7 @@ function getNavigationByRole(role) {
   if (role === 'enseignant') {
     return [
       ...common,
+      { key: 'qr', label: 'Pointage QR-Code', icon: 'QR' },
       { key: 'cahier', label: 'Cahier de texte', icon: 'CT' },
       { key: 'vacations', label: 'Mes vacations', icon: 'FV' },
       { key: 'rapports', label: 'Rapports', icon: 'RP' },
@@ -1032,3 +1035,4 @@ function RapportsPage({ user }) {
 }
 
 export default App
+
