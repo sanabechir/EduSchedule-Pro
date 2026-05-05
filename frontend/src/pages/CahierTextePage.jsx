@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './CahierTextePage.css'
 import {
   DEFAULT_CLASSES,
@@ -8,6 +8,12 @@ import {
   useAppStore,
 } from '../services/appStore'
 import { getClassNameFromUser, getTeacherNameFromUser } from '../services/userScope'
+import {
+  buildCardsHtml,
+  buildSignaturesHtml,
+  buildTableHtml,
+  exportHtmlToPdf,
+} from '../services/pdfExport'
 
 const EMPTY_FORM = {
   titre: '',
@@ -38,7 +44,7 @@ function CahierTextePage({ user }) {
     const unique = [
       ...new Set([
         ...DEFAULT_CLASSES,
-        ...store.seances.map((item) => item.classe).filter(Boolean),
+        ...(store.seances || []).map((item) => item.classe).filter(Boolean),
       ]),
     ]
 
@@ -46,7 +52,7 @@ function CahierTextePage({ user }) {
   }, [store.seances])
 
   const seances = useMemo(() => {
-    return store.seances
+    return (store.seances || [])
       .filter((item) => item.weekKey === selectedWeek)
       .filter((item) =>
         selectedClasse === 'Toutes' ? true : item.classe === selectedClasse,
@@ -57,14 +63,12 @@ function CahierTextePage({ user }) {
           : true,
       )
       .filter((item) =>
-        role === 'delegue' && delegateClass
-          ? item.classe === delegateClass
-          : true,
+        role === 'delegue' && delegateClass ? item.classe === delegateClass : true,
       )
       .filter((item) => {
         if (role !== 'comptable') return true
 
-        return store.cahiers.some(
+        return (store.cahiers || []).some(
           (cahier) => cahier.seanceId === item.id && cahier.locked,
         )
       })
@@ -91,23 +95,26 @@ function CahierTextePage({ user }) {
     if (!selectedSeanceId) return seances[0] || null
 
     return (
-      store.seances.find((item) => item.id === selectedSeanceId) ||
+      seances.find((item) => item.id === selectedSeanceId) ||
       seances[0] ||
       null
     )
-  }, [selectedSeanceId, store.seances, seances])
+  }, [selectedSeanceId, seances])
 
   const cahier = useMemo(() => {
     if (!selectedSeance) return null
+
     return (
-      store.cahiers.find((item) => item.seanceId === selectedSeance.id) || null
+      (store.cahiers || []).find((item) => item.seanceId === selectedSeance.id) ||
+      null
     )
   }, [store.cahiers, selectedSeance])
 
   const pointage = useMemo(() => {
     if (!selectedSeance) return null
+
     return (
-      store.pointages.find((item) => item.seanceId === selectedSeance.id) ||
+      (store.pointages || []).find((item) => item.seanceId === selectedSeance.id) ||
       null
     )
   }, [store.pointages, selectedSeance])
@@ -129,7 +136,7 @@ function CahierTextePage({ user }) {
   const stats = useMemo(() => {
     const seanceIds = seances.map((item) => item.id)
 
-    const cahiersForFilter = store.cahiers.filter((item) =>
+    const cahiersForFilter = (store.cahiers || []).filter((item) =>
       seanceIds.includes(item.seanceId),
     )
 
@@ -185,6 +192,8 @@ function CahierTextePage({ user }) {
 
     const result = actions.saveCahier(selectedSeance.id, {
       ...form,
+      signatureDelegueImage: cahier?.signatureDelegueImage || '',
+      signatureEnseignantImage: cahier?.signatureEnseignantImage || '',
       statut: cahier?.statut || 'brouillon',
     })
 
@@ -196,9 +205,28 @@ function CahierTextePage({ user }) {
     setMessage('Cahier de texte enregistré avec succès.')
   }
 
-  const signDelegue = () => {
+  const signDelegue = (signatureImage) => {
     if (!selectedSeance || !cahier) {
       setMessage('Le cahier doit d’abord être rempli avant signature.')
+      return
+    }
+
+    if (!signatureImage) {
+      setMessage('Veuillez dessiner la signature du délégué.')
+      return
+    }
+
+    const saveResult = actions.saveCahier(selectedSeance.id, {
+      ...form,
+      signatureDelegueImage: signatureImage,
+      signatureEnseignantImage: cahier?.signatureEnseignantImage || '',
+      statut: cahier?.statut || 'brouillon',
+    })
+
+    if (!saveResult.success) {
+      setMessage(
+        saveResult.message || 'Erreur lors de l’enregistrement de la signature.',
+      )
       return
     }
 
@@ -209,10 +237,10 @@ function CahierTextePage({ user }) {
       return
     }
 
-    setMessage('Signature du délégué enregistrée.')
+    setMessage('Signature dessinée du délégué enregistrée.')
   }
 
-  const signTeacher = () => {
+  const signTeacher = (signatureImage) => {
     if (!selectedSeance || !cahier) {
       setMessage('Le cahier doit d’abord être rempli.')
       return
@@ -220,6 +248,25 @@ function CahierTextePage({ user }) {
 
     if (!cahier.signatureDelegue) {
       setMessage('Le délégué doit signer avant l’enseignant.')
+      return
+    }
+
+    if (!signatureImage) {
+      setMessage('Veuillez dessiner la signature de l’enseignant.')
+      return
+    }
+
+    const saveResult = actions.saveCahier(selectedSeance.id, {
+      ...form,
+      signatureDelegueImage: cahier?.signatureDelegueImage || '',
+      signatureEnseignantImage: signatureImage,
+      statut: cahier?.statut || 'brouillon',
+    })
+
+    if (!saveResult.success) {
+      setMessage(
+        saveResult.message || 'Erreur lors de l’enregistrement de la signature.',
+      )
       return
     }
 
@@ -233,8 +280,95 @@ function CahierTextePage({ user }) {
     actions.generateVacation(selectedSeance.id)
 
     setMessage(
-      'Signature enseignant enregistrée. Le cahier est clôturé et la vacation est générée.',
+      'Signature dessinée enseignant enregistrée. Le cahier est clôturé et la vacation est générée.',
     )
+  }
+
+  const exportCahierPdf = () => {
+    if (!selectedSeance || !cahier) {
+      setMessage('Aucun cahier à exporter.')
+      return
+    }
+
+    const contentHtml = `
+      <div class="pdf-page">
+        ${buildCardsHtml([
+          { label: 'Classe', value: selectedSeance.classe },
+          { label: 'Matière', value: selectedSeance.matiere },
+          { label: 'Enseignant', value: selectedSeance.enseignant },
+          { label: 'Jour', value: selectedSeance.jour },
+          { label: 'Horaire', value: formatSlot(selectedSeance.horaire) },
+          { label: 'Salle', value: selectedSeance.salle },
+          { label: 'Statut', value: cahier.locked ? 'Clôturé' : 'Ouvert' },
+          {
+            label: 'Signatures',
+            value:
+              cahier.signatureDelegue && cahier.signatureEnseignant
+                ? 'Complètes'
+                : 'Incomplètes',
+          },
+        ])}
+
+        <div class="pdf-section">
+          <h2>Informations de la séance</h2>
+          ${buildTableHtml(
+            ['Champ', 'Contenu'],
+            [
+              ['Titre de la séance', cahier.titre || 'Non renseigné'],
+              ['Contenu réalisé', cahier.contenu || 'Non renseigné'],
+              ['Travaux demandés', cahier.travaux || 'Non renseigné'],
+              ['Observations', cahier.observation || 'Aucune observation'],
+            ],
+          )}
+        </div>
+
+        <div class="pdf-section">
+          <h2>Validation du cahier</h2>
+          ${buildTableHtml(
+            ['Acteur', 'Statut'],
+            [
+              [
+                'Délégué de classe',
+                cahier.signatureDelegue ? 'Signé' : 'En attente',
+              ],
+              [
+                'Enseignant',
+                cahier.signatureEnseignant ? 'Signé' : 'En attente',
+              ],
+              [
+                'Verrouillage',
+                cahier.locked ? 'Cahier clôturé' : 'Cahier ouvert',
+              ],
+            ],
+          )}
+        </div>
+
+        <div class="pdf-section">
+          <h2>Signatures</h2>
+          ${buildSignaturesHtml([
+            {
+              label: 'Signature du délégué',
+              image: cahier.signatureDelegueImage,
+            },
+            {
+              label: 'Signature de l’enseignant',
+              image: cahier.signatureEnseignantImage,
+            },
+          ])}
+        </div>
+      </div>
+    `
+
+    exportHtmlToPdf({
+      title: 'Cahier de texte',
+      subtitle: `${selectedSeance.classe} - ${selectedSeance.matiere}`,
+      filename: makePdfFilename(
+        `cahier-${selectedSeance.classe}-${selectedSeance.matiere}.pdf`,
+      ),
+      contentHtml,
+    })
+
+    setMessage('PDF du cahier de texte généré.')
   }
 
   return (
@@ -323,12 +457,13 @@ function CahierTextePage({ user }) {
 
             {seances.map((seance) => {
               const itemCahier =
-                store.cahiers.find((item) => item.seanceId === seance.id) ||
+                (store.cahiers || []).find((item) => item.seanceId === seance.id) ||
                 null
 
               const itemPointage =
-                store.pointages.find((item) => item.seanceId === seance.id) ||
-                null
+                (store.pointages || []).find(
+                  (item) => item.seanceId === seance.id,
+                ) || null
 
               return (
                 <button
@@ -411,6 +546,7 @@ function CahierTextePage({ user }) {
                   title="Délégué de classe"
                   subtitle="Signature côté classe"
                   signed={!!cahier?.signatureDelegue}
+                  image={cahier?.signatureDelegueImage}
                   canSign={!!canSignDelegue}
                   onSign={signDelegue}
                 />
@@ -419,6 +555,7 @@ function CahierTextePage({ user }) {
                   title="Enseignant"
                   subtitle="Validation pédagogique"
                   signed={!!cahier?.signatureEnseignant}
+                  image={cahier?.signatureEnseignantImage}
                   canSign={!!canSignTeacher}
                   onSign={signTeacher}
                 />
@@ -493,6 +630,12 @@ function CahierTextePage({ user }) {
                   </button>
                 )}
 
+                {cahier && (
+                  <button className="isge-secondary-btn" onClick={exportCahierPdf}>
+                    Exporter PDF
+                  </button>
+                )}
+
                 {!permissions.canFill &&
                   !permissions.canSignDelegue &&
                   !permissions.canSignTeacher && (
@@ -515,7 +658,76 @@ function CahierTextePage({ user }) {
   )
 }
 
-function SignatureBox({ title, subtitle, signed, canSign, onSign }) {
+function SignatureBox({ title, subtitle, signed, image, canSign, onSign }) {
+  const canvasRef = useRef(null)
+  const [isDrawing, setIsDrawing] = useState(false)
+  const [hasInk, setHasInk] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!canSign || signed) return
+
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    prepareCanvas(canvas)
+  }, [canSign, signed])
+
+  const startDrawing = (event) => {
+    if (!canSign || signed) return
+
+    event.preventDefault()
+
+    const canvas = canvasRef.current
+    const ctx = canvas.getContext('2d')
+    const point = getCanvasPoint(event, canvas)
+
+    ctx.beginPath()
+    ctx.moveTo(point.x, point.y)
+
+    setIsDrawing(true)
+    setHasInk(true)
+    setError('')
+  }
+
+  const draw = (event) => {
+    if (!isDrawing || !canSign || signed) return
+
+    event.preventDefault()
+
+    const canvas = canvasRef.current
+    const ctx = canvas.getContext('2d')
+    const point = getCanvasPoint(event, canvas)
+
+    ctx.lineTo(point.x, point.y)
+    ctx.stroke()
+  }
+
+  const stopDrawing = () => {
+    setIsDrawing(false)
+  }
+
+  const clearSignature = () => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    prepareCanvas(canvas)
+    setHasInk(false)
+    setError('')
+  }
+
+  const submitSignature = () => {
+    if (!hasInk) {
+      setError('Dessinez la signature avant de valider.')
+      return
+    }
+
+    const canvas = canvasRef.current
+    const imageData = canvas.toDataURL('image/png')
+
+    onSign(imageData)
+  }
+
   return (
     <div className={signed ? 'signature-box signed' : 'signature-box'}>
       <div>
@@ -525,19 +737,69 @@ function SignatureBox({ title, subtitle, signed, canSign, onSign }) {
 
       <div className="signature-area">
         {signed ? (
-          <span className="signature-written">Signé</span>
+          image ? (
+            <img className="signature-image" src={image} alt={`Signature ${title}`} />
+          ) : (
+            <span className="signature-written">Signé</span>
+          )
+        ) : canSign ? (
+          <canvas
+            ref={canvasRef}
+            className="signature-canvas"
+            onMouseDown={startDrawing}
+            onMouseMove={draw}
+            onMouseUp={stopDrawing}
+            onMouseLeave={stopDrawing}
+            onTouchStart={startDrawing}
+            onTouchMove={draw}
+            onTouchEnd={stopDrawing}
+          />
         ) : (
           <span className="signature-empty">Signature en attente</span>
         )}
       </div>
 
-      {canSign && (
-        <button type="button" className="cahier-sign-btn" onClick={onSign}>
-          Signer maintenant
-        </button>
+      {error && <div className="signature-error">{error}</div>}
+
+      {canSign && !signed && (
+        <div className="signature-tools">
+          <button type="button" className="cahier-sign-btn" onClick={submitSignature}>
+            Valider la signature
+          </button>
+
+          <button type="button" className="signature-clear-btn" onClick={clearSignature}>
+            Effacer
+          </button>
+        </div>
       )}
     </div>
   )
+}
+
+function prepareCanvas(canvas) {
+  const rect = canvas.getBoundingClientRect()
+  const ratio = window.devicePixelRatio || 1
+
+  canvas.width = rect.width * ratio
+  canvas.height = rect.height * ratio
+
+  const ctx = canvas.getContext('2d')
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
+  ctx.clearRect(0, 0, rect.width, rect.height)
+  ctx.lineWidth = 2.4
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.strokeStyle = '#0f172a'
+}
+
+function getCanvasPoint(event, canvas) {
+  const rect = canvas.getBoundingClientRect()
+  const source = event.touches ? event.touches[0] : event
+
+  return {
+    x: source.clientX - rect.left,
+    y: source.clientY - rect.top,
+  }
 }
 
 function StatBox({ label, value, code }) {
@@ -663,6 +925,15 @@ function formatPointage(status) {
 
 function getWeek(weekKey) {
   return WEEK_OPTIONS.find((item) => item.key === weekKey) || WEEK_OPTIONS[0]
+}
+
+function makePdfFilename(value) {
+  return String(value)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9.]+/g, '-')
+    .replace(/-+/g, '-')
 }
 
 export default CahierTextePage

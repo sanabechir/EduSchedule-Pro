@@ -54,9 +54,7 @@ function PointageQRCode({ user }) {
           : true,
       )
       .filter((item) =>
-        role === 'delegue' && delegateClass
-          ? item.classe === delegateClass
-          : true,
+        role === 'delegue' && delegateClass ? item.classe === delegateClass : true,
       )
       .sort((a, b) => {
         const dayA = week.days.findIndex((day) => day.key === a.jour)
@@ -196,14 +194,17 @@ function PointageQRCode({ user }) {
       return
     }
 
-    const label =
-      status === 'present'
-        ? 'Présence validée.'
-        : status === 'retard'
-          ? 'Retard enregistré.'
-          : 'Absence enregistrée.'
+    if (status === 'present') {
+      setMessage('Présence confirmée.')
+    }
 
-    setMessage(label)
+    if (status === 'retard') {
+      setMessage('Retard confirmé.')
+    }
+
+    if (status === 'absent') {
+      setMessage('Absence confirmée.')
+    }
   }
 
   const handleDelegateReport = (type) => {
@@ -213,7 +214,7 @@ function PointageQRCode({ user }) {
     }
 
     if (!permissions.canReport) {
-      setMessage('Vous n’avez pas le droit de signaler cette anomalie.')
+      setMessage('Seul le délégué peut signaler une anomalie de cours.')
       return
     }
 
@@ -397,13 +398,19 @@ function PointageQRCode({ user }) {
 
         <section className="panel qr-panel">
           <div className="panel-header">
-            <h3>QR-Code séance</h3>
+            <h3>
+              {role === 'delegue'
+                ? 'Signalement du cours'
+                : role === 'enseignant'
+                  ? 'Scan enseignant'
+                  : 'Contrôle du pointage'}
+            </h3>
             <button>{getRoleLabel(role)}</button>
           </div>
 
           {!selectedSeance ? (
             <div className="qr-empty-state">
-              Sélectionnez une séance pour afficher son QR-Code.
+              Sélectionnez une séance pour continuer.
             </div>
           ) : (
             <>
@@ -416,14 +423,29 @@ function PointageQRCode({ user }) {
                 </small>
               </div>
 
-              <FakeQRCode
-                seance={selectedSeance}
-                active={generatedQr[selectedSeance.id]}
-              />
+              {role !== 'delegue' && (
+                <>
+                  <FakeQRCode
+                    seance={selectedSeance}
+                    active={generatedQr[selectedSeance.id]}
+                  />
 
-              <div className="qr-token-box">
-                QR-{selectedSeance.id}-{selectedSeance.weekKey}
-              </div>
+                  <div className="qr-token-box">
+                    QR-{selectedSeance.id}-{selectedSeance.weekKey}
+                  </div>
+                </>
+              )}
+
+              {role === 'delegue' && (
+                <div className="qr-current-status">
+                  <strong>Rôle du délégué</strong>
+                  <span>
+                    Le délégué ne valide pas officiellement une absence. Il
+                    signale seulement un retard ou une absence de professeur au
+                    surveillant.
+                  </span>
+                </div>
+              )}
 
               {pointage && (
                 <div className="qr-current-status">
@@ -457,21 +479,21 @@ function PointageQRCode({ user }) {
                       className="primary-btn"
                       onClick={() => handleManualPointage('present')}
                     >
-                      Valider présence
+                      Confirmer présent
                     </button>
 
                     <button
                       className="qr-warning-btn"
                       onClick={() => handleManualPointage('retard')}
                     >
-                      Marquer retard
+                      Confirmer retard
                     </button>
 
                     <button
                       className="qr-danger-btn"
                       onClick={() => handleManualPointage('absent')}
                     >
-                      Marquer absent
+                      Confirmer absence
                     </button>
                   </>
                 )}
@@ -559,7 +581,7 @@ function getPermissions(role) {
       canGenerateQR: true,
       canTeacherScan: false,
       canManualControl: true,
-      canReport: true,
+      canReport: false,
     }
   }
 
@@ -569,7 +591,7 @@ function getPermissions(role) {
       canGenerateQR: true,
       canTeacherScan: false,
       canManualControl: true,
-      canReport: true,
+      canReport: false,
     }
   }
 
@@ -641,13 +663,13 @@ function getRoleLabel(role) {
 function getRoleDescription(role) {
   const descriptions = {
     admin:
-      'Vous pouvez générer le QR-Code, corriger les présences, retards et absences.',
+      'Vous générez les QR-Codes et corrigez officiellement les pointages.',
     surveillant:
-      'Vous contrôlez les pointages et confirmez les retards ou absences.',
+      'Vous contrôlez les séances et confirmez les retards ou absences.',
     enseignant:
-      'Vous voyez seulement vos cours et vous scannez le QR-Code pour valider votre présence.',
+      'Vous voyez uniquement vos cours et vous scannez le QR-Code pour valider votre présence.',
     delegue:
-      'Vous voyez seulement votre classe et vous pouvez signaler un retard ou une absence de professeur.',
+      'Vous voyez uniquement votre classe et vous signalez une anomalie de cours.',
     comptable:
       'Le comptable n’intervient pas dans le pointage QR-Code.',
   }

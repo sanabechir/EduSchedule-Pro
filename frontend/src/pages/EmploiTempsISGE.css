@@ -1,0 +1,224 @@
+.emploi-page {
+  padding-bottom: 42px;
+}
+
+.emploi-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 22px;
+  padding: 18px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #e8ebf4;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.05);
+}
+
+.emploi-toolbar .isge-filter {
+  flex: 1;
+}
+
+.pdf-btn {
+  color: #4f46e5;
+  background: #f4f0ff;
+}
+
+.emploi-message {
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #bbf7d0;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.emploi-form-panel {
+  margin-bottom: 24px;
+}
+
+.emploi-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.emploi-form-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.emploi-class-list {
+  display: grid;
+  gap: 28px;
+}
+
+.emploi-class-board {
+  overflow: hidden;
+}
+
+.emploi-class-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+  padding-bottom: 22px;
+  border-bottom: 1px solid #e8ebf4;
+  margin-bottom: 18px;
+}
+
+.emploi-class-header span {
+  display: inline-block;
+  color: #4f46e5;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.emploi-class-header h2 {
+  margin: 8px 0 0;
+  color: #0f172a;
+  font-size: 28px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.emploi-class-badge {
+  padding: 14px 20px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #7c3aed, #4f46e5);
+  color: white;
+  font-weight: 950;
+  box-shadow: 0 18px 40px rgba(79, 70, 229, 0.25);
+}
+
+.emploi-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 24px;
+  border: 1px solid #e8ebf4;
+}
+
+.emploi-table {
+  width: 100%;
+  min-width: 1060px;
+  border-collapse: collapse;
+  background: #ffffff;
+}
+
+.emploi-table th {
+  padding: 16px 12px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 13px;
+  font-weight: 950;
+  text-align: center;
+  border-bottom: 1px solid #dbe3f1;
+  border-right: 1px solid #dbe3f1;
+}
+
+.emploi-table td {
+  min-height: 150px;
+  width: 14%;
+  padding: 12px;
+  vertical-align: top;
+  border-bottom: 1px solid #edf0f7;
+  border-right: 1px solid #edf0f7;
+  background: #ffffff;
+}
+
+.emploi-table .horaire-cell {
+  width: 125px;
+  color: #334155;
+  background: #f8fafc;
+  font-weight: 950;
+  text-align: center;
+}
+
+.emploi-cell-stack {
+  display: grid;
+  gap: 10px;
+  min-height: 125px;
+}
+
+.emploi-course-card {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  padding: 14px 12px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  border-left: 5px solid #4f46e5;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+}
+
+.emploi-course-card strong {
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 950;
+  padding-right: 46px;
+}
+
+.emploi-course-card small {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.emploi-course-card em {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #ede9fe;
+  color: #4f46e5;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 950;
+}
+
+.emploi-course-card button {
+  width: fit-content;
+  margin-top: 6px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #991b1b;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.emploi-empty-cell {
+  display: grid;
+  place-items: center;
+  min-height: 115px;
+  color: #cbd5e1;
+  font-weight: 900;
+}
+
+.emploi-empty-panel {
+  color: #64748b;
+  font-weight: 900;
+  text-align: center;
+}
+
+@media (max-width: 1100px) {
+  .emploi-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .emploi-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .emploi-class-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

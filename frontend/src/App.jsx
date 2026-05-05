@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
+import DynamicDashboard from './pages/DynamicDashboard.jsx'
+import RapportsPageNew from './pages/RapportsPage.jsx'
 import PointageQRCode from './pages/PointageQRCode.jsx'
 import CahierTextePage from './pages/CahierTextePage.jsx'
+import VacationsPageNew from './pages/VacationsPage.jsx'
 import EmploiTempsISGE from './pages/EmploiTempsISGE.jsx'
 
 const API_BASE = 'http://localhost/EduSchedule-Pro/backend/api'
@@ -42,12 +45,12 @@ function App() {
       user={user}
       onLogout={logout}
     >
-      {page === 'dashboard' && <DashboardRouter token={token} user={user} />}
+      {page === 'dashboard' && <DynamicDashboard user={user} setPage={setPage} />}
       {page === 'emploi' && <EmploiTempsISGE user={user} />}
       {page === 'qr' && <PointageQRCode user={user} />}
       {page === 'cahier' && <CahierTextePage user={user} />}
-      {page === 'vacations' && <VacationsPage user={user} />}
-      {page === 'rapports' && <RapportsPage user={user} />}
+      {page === 'vacations' && <VacationsPageNew user={user} />}
+      {page === 'rapports' && <RapportsPageNew user={user} />}
     </DashboardLayout>
   )
 }
@@ -1036,6 +1039,10 @@ function RapportsPage({ user }) {
 }
 
 export default App
+
+
+
+
 
 
 
