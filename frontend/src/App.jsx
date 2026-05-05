@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import PointageQRCode from './pages/PointageQRCode.jsx'
+import CahierTextePage from './pages/CahierTextePage.jsx'
 import EmploiTempsISGE from './pages/EmploiTempsISGE.jsx'
 
 const API_BASE = 'http://localhost/EduSchedule-Pro/backend/api'
@@ -42,9 +43,9 @@ function App() {
       onLogout={logout}
     >
       {page === 'dashboard' && <DashboardRouter token={token} user={user} />}
-      {page === 'emploi' && <EmploiTempsISGE token={token} />}
+      {page === 'emploi' && <EmploiTempsISGE user={user} />}
       {page === 'qr' && <PointageQRCode user={user} />}
-      {page === 'cahier' && <CahierPage user={user} />}
+      {page === 'cahier' && <CahierTextePage user={user} />}
       {page === 'vacations' && <VacationsPage user={user} />}
       {page === 'rapports' && <RapportsPage user={user} />}
     </DashboardLayout>
@@ -1035,4 +1036,6 @@ function RapportsPage({ user }) {
 }
 
 export default App
+
+
 

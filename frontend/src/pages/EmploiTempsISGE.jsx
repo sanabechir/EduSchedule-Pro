@@ -12,6 +12,7 @@ import {
   sortSlots,
   useAppStore,
 } from '../services/appStore'
+import { getTeacherNameFromUser } from '../services/userScope'
 
 const EMPTY_FORM = {
   classe: 'Licence 1 RIT',
@@ -24,10 +25,16 @@ const EMPTY_FORM = {
   groupe: '',
 }
 
-function EmploiTempsISGE() {
+function EmploiTempsISGE({ user }) {
   const { store, actions } = useAppStore()
 
+  const role = user?.role || 'admin'
+  const connectedTeacher = getTeacherNameFromUser(user)
+
   const [classe, setClasse] = useState('Toutes')
+  const [teacherFilter, setTeacherFilter] = useState(
+    role === 'enseignant' && connectedTeacher ? connectedTeacher : 'Tous',
+  )
   const [selectedWeek, setSelectedWeek] = useState(DEFAULT_WEEK_KEY)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
@@ -78,9 +85,12 @@ function EmploiTempsISGE() {
   }, [store.seances])
 
   const filteredItems = useMemo(() => {
-    if (classe === 'Toutes') return weekItems
-    return weekItems.filter((item) => item.classe === classe)
-  }, [weekItems, classe])
+    return weekItems
+      .filter((item) => (classe === 'Toutes' ? true : item.classe === classe))
+      .filter((item) =>
+        teacherFilter === 'Tous' ? true : item.enseignant === teacherFilter,
+      )
+  }, [weekItems, classe, teacherFilter])
 
   const slots = useMemo(() => {
     const dynamicSlots = [
@@ -90,7 +100,11 @@ function EmploiTempsISGE() {
     const merged = [...DEFAULT_SLOTS]
 
     dynamicSlots.forEach((slot) => {
-      if (!merged.some((existing) => normalizeSlot(existing) === normalizeSlot(slot))) {
+      if (
+        !merged.some(
+          (existing) => normalizeSlot(existing) === normalizeSlot(slot),
+        )
+      ) {
         merged.push(slot)
       }
     })
@@ -157,6 +171,7 @@ function EmploiTempsISGE() {
     setConflicts([])
     setShowForm(false)
     setClasse(candidate.classe)
+    setTeacherFilter(candidate.enseignant)
   }
 
   const deleteCourse = (course) => {
@@ -178,6 +193,9 @@ function EmploiTempsISGE() {
 
     actions.resetStore()
     setClasse('Toutes')
+    setTeacherFilter(
+      role === 'enseignant' && connectedTeacher ? connectedTeacher : 'Tous',
+    )
     setSelectedWeek(DEFAULT_WEEK_KEY)
     setShowForm(false)
     setConflicts([])
@@ -188,18 +206,20 @@ function EmploiTempsISGE() {
       <div className="page-heading">
         <div>
           <h1>Emploi du temps</h1>
-          <p>Vue hebdomadaire structurée par classe, jour et horaire.</p>
+          <p>Vue hebdomadaire structurée par classe, professeur, jour et horaire.</p>
         </div>
 
-        <button
-          className="primary-btn"
-          onClick={() => {
-            setShowForm((value) => !value)
-            setConflicts([])
-          }}
-        >
-          {showForm ? 'Fermer le formulaire' : '+ Nouvelle séance'}
-        </button>
+        {role !== 'enseignant' && (
+          <button
+            className="primary-btn"
+            onClick={() => {
+              setShowForm((value) => !value)
+              setConflicts([])
+            }}
+          >
+            {showForm ? 'Fermer le formulaire' : '+ Nouvelle séance'}
+          </button>
+        )}
       </div>
 
       {showForm && (
@@ -324,6 +344,22 @@ function EmploiTempsISGE() {
         </div>
 
         <div className="isge-filter">
+          <label>Professeur</label>
+          <select
+            value={teacherFilter}
+            onChange={(e) => setTeacherFilter(e.target.value)}
+            disabled={role === 'enseignant'}
+          >
+            <option value="Tous">Tous les professeurs</option>
+            {teachers.map((teacher) => (
+              <option key={teacher} value={teacher}>
+                {teacher}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="isge-filter">
           <label>Semaine</label>
           <select
             value={selectedWeek}
@@ -360,9 +396,10 @@ function EmploiTempsISGE() {
         </div>
 
         <div className="isge-demo-note">
-          Les données de cette page viennent maintenant du store central frontend.
-          Les prochaines pages QR-Code, Cahier, Vacations et Rapports utiliseront
-          les mêmes séances.
+          Filtre actif :{' '}
+          <strong>
+            {teacherFilter === 'Tous' ? 'Tous les professeurs' : teacherFilter}
+          </strong>
         </div>
 
         <div className="isge-table-wrap">
@@ -399,6 +436,7 @@ function EmploiTempsISGE() {
                               course={course}
                               showClass={classe === 'Toutes'}
                               onDelete={deleteCourse}
+                              canDelete={role !== 'enseignant'}
                             />
                           ))
                         )}
@@ -436,7 +474,7 @@ function FormSelect({ label, value, onChange, options }) {
   )
 }
 
-function CourseBlock({ course, showClass, onDelete }) {
+function CourseBlock({ course, showClass, onDelete, canDelete }) {
   return (
     <div className={`isge-course ${course.type || 'cours'}`}>
       <div className="isge-course-meta">
@@ -457,13 +495,15 @@ function CourseBlock({ course, showClass, onDelete }) {
 
       {course.groupe && <em>{course.groupe}</em>}
 
-      <button
-        type="button"
-        className="isge-delete-course"
-        onClick={() => onDelete(course)}
-      >
-        Supprimer
-      </button>
+      {canDelete && (
+        <button
+          type="button"
+          className="isge-delete-course"
+          onClick={() => onDelete(course)}
+        >
+          Supprimer
+        </button>
+      )}
     </div>
   )
 }

@@ -1,0 +1,417 @@
+/* =========================
+   CAHIER DE TEXTE PAGE
+========================= */
+
+.cahier-page {
+  padding-bottom: 40px;
+}
+
+.cahier-role-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: #f8fafc;
+  border: 1px solid #e8ebf4;
+  color: #475569;
+}
+
+.cahier-role-note strong {
+  color: #4f46e5;
+  font-size: 14px;
+  text-transform: uppercase;
+}
+
+.cahier-role-note span {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.cahier-toolbar {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  margin-bottom: 22px;
+  padding: 18px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #e8ebf4;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.05);
+}
+
+.cahier-message {
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #bbf7d0;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.cahier-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 1.05fr);
+  gap: 24px;
+}
+
+.cahier-session-list {
+  display: grid;
+  gap: 12px;
+}
+
+.cahier-session-card {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 16px;
+  border-radius: 18px;
+  text-align: left;
+  background: #f8fafc;
+  border: 1px solid #eef1f7;
+  transition: all 0.2s ease;
+}
+
+.cahier-session-card:hover {
+  transform: translateY(-2px);
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+}
+
+.cahier-session-card.active {
+  background: #f4f0ff;
+  border-color: #c4b5fd;
+}
+
+.cahier-session-card strong,
+.cahier-session-card span,
+.cahier-session-card small {
+  display: block;
+}
+
+.cahier-session-card strong {
+  color: #0f172a;
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.cahier-session-card span {
+  margin-top: 6px;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.cahier-session-card small {
+  margin-top: 6px;
+  color: #64748b;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.cahier-badges {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+  min-width: 125px;
+}
+
+.cahier-status,
+.pointage-mini {
+  width: fit-content;
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.cahier-status.none,
+.pointage-mini.non_pointe {
+  color: #475569;
+  background: #e2e8f0;
+}
+
+.cahier-status.draft {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.cahier-status.delegue {
+  color: #4f46e5;
+  background: #eef2ff;
+}
+
+.cahier-status.locked,
+.pointage-mini.present {
+  color: #047857;
+  background: #d1fae5;
+}
+
+.pointage-mini.retard {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.pointage-mini.absent {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.cahier-editor-panel {
+  min-height: 650px;
+}
+
+.cahier-selected-info {
+  padding: 16px;
+  border-radius: 18px;
+  background: #f8fafc;
+  border: 1px solid #edf0f7;
+  margin-bottom: 16px;
+}
+
+.cahier-selected-info strong,
+.cahier-selected-info span,
+.cahier-selected-info small {
+  display: block;
+}
+
+.cahier-selected-info strong {
+  font-size: 18px;
+  color: #0f172a;
+  line-height: 1.35;
+}
+
+.cahier-selected-info span {
+  margin-top: 6px;
+  color: #4f46e5;
+  font-weight: 900;
+}
+
+.cahier-selected-info small {
+  margin-top: 6px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.cahier-status-line {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.cahier-status-line div {
+  padding: 14px;
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1px solid #edf0f7;
+}
+
+.cahier-status-line span {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.cahier-status-line strong {
+  display: block;
+  margin-top: 5px;
+  color: #0f172a;
+}
+
+.cahier-form {
+  display: grid;
+  gap: 14px;
+}
+
+.cahier-form-group {
+  display: grid;
+  gap: 8px;
+}
+
+.cahier-form-group label {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.cahier-form-group input,
+.cahier-form-group textarea {
+  width: 100%;
+  border: 1px solid #dbe1ee;
+  border-radius: 16px;
+  background: white;
+  color: #0f172a;
+  font-weight: 700;
+  outline: none;
+  font-family: inherit;
+}
+
+.cahier-form-group input {
+  height: 48px;
+  padding: 0 14px;
+}
+
+.cahier-form-group textarea {
+  min-height: 110px;
+  padding: 14px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.cahier-form-group input:focus,
+.cahier-form-group textarea:focus {
+  border-color: #6d5dfc;
+  box-shadow: 0 0 0 4px rgba(109, 93, 252, 0.12);
+}
+
+.cahier-form-group input:disabled,
+.cahier-form-group textarea:disabled {
+  color: #64748b;
+  background: #f8fafc;
+}
+
+.cahier-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.cahier-sign-btn {
+  padding: 13px 18px;
+  border-radius: 14px;
+  color: #4f46e5;
+  background: #f4f0ff;
+  font-weight: 900;
+}
+
+.cahier-readonly,
+.cahier-locked {
+  padding: 13px 16px;
+  border-radius: 14px;
+  font-weight: 900;
+}
+
+.cahier-readonly {
+  color: #475569;
+  background: #f1f5f9;
+}
+
+.cahier-locked {
+  color: #047857;
+  background: #ecfdf5;
+}
+
+.cahier-empty-state {
+  padding: 30px;
+  border-radius: 18px;
+  background: #f8fafc;
+  color: #64748b;
+  font-weight: 800;
+  text-align: center;
+}
+
+@media (max-width: 1050px) {
+  .cahier-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cahier-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .cahier-status-line {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .cahier-role-note {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .cahier-session-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .cahier-badges {
+    justify-items: start;
+    min-width: 0;
+  }
+}
+.cahier-signature-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.signature-box {
+  padding: 16px;
+  border-radius: 18px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+}
+
+.signature-box.signed {
+  background: #ecfdf5;
+  border-color: #86efac;
+}
+
+.signature-box span {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.signature-box strong {
+  display: block;
+  margin-top: 5px;
+  color: #0f172a;
+  font-size: 15px;
+}
+
+.signature-area {
+  display: grid;
+  place-items: center;
+  min-height: 86px;
+  margin: 14px 0;
+  border-radius: 16px;
+  background: white;
+  border: 1px solid #e2e8f0;
+}
+
+.signature-written {
+  color: #047857 !important;
+  font-size: 28px !important;
+  font-weight: 900 !important;
+  font-family: cursive;
+  transform: rotate(-4deg);
+}
+
+.signature-empty {
+  color: #94a3b8 !important;
+  font-weight: 800 !important;
+}
+
+@media (max-width: 720px) {
+  .cahier-signature-grid {
+    grid-template-columns: 1fr;
+  }
+}

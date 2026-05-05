@@ -7,15 +7,20 @@ import {
   parseSlot,
   useAppStore,
 } from '../services/appStore'
+import { getClassNameFromUser, getTeacherNameFromUser } from '../services/userScope'
 
 function PointageQRCode({ user }) {
   const { store, actions } = useAppStore()
 
   const role = user?.role || 'admin'
   const permissions = getPermissions(role)
+  const teacherName = getTeacherNameFromUser(user)
+  const delegateClass = getClassNameFromUser(user)
 
   const [selectedWeek, setSelectedWeek] = useState(DEFAULT_WEEK_KEY)
-  const [selectedClasse, setSelectedClasse] = useState('Toutes')
+  const [selectedClasse, setSelectedClasse] = useState(
+    role === 'delegue' && delegateClass ? delegateClass : 'Toutes',
+  )
   const [selectedDay, setSelectedDay] = useState('Tous')
   const [selectedSeanceId, setSelectedSeanceId] = useState(null)
   const [message, setMessage] = useState('')
@@ -43,6 +48,16 @@ function PointageQRCode({ user }) {
       .filter((item) =>
         selectedDay === 'Tous' ? true : item.jour === selectedDay,
       )
+      .filter((item) =>
+        role === 'enseignant' && teacherName
+          ? item.enseignant === teacherName
+          : true,
+      )
+      .filter((item) =>
+        role === 'delegue' && delegateClass
+          ? item.classe === delegateClass
+          : true,
+      )
       .sort((a, b) => {
         const dayA = week.days.findIndex((day) => day.key === a.jour)
         const dayB = week.days.findIndex((day) => day.key === b.jour)
@@ -51,7 +66,16 @@ function PointageQRCode({ user }) {
 
         return a.horaire.localeCompare(b.horaire)
       })
-  }, [store.seances, selectedWeek, selectedClasse, selectedDay, week.days])
+  }, [
+    store.seances,
+    selectedWeek,
+    selectedClasse,
+    selectedDay,
+    week.days,
+    role,
+    teacherName,
+    delegateClass,
+  ])
 
   const selectedSeance = useMemo(() => {
     if (!selectedSeanceId) return seances[0] || null
@@ -133,7 +157,7 @@ function PointageQRCode({ user }) {
     const result = actions.markPointage(
       selectedSeance.id,
       autoStatus,
-      getRoleLabel(role),
+      teacherName || getRoleLabel(role),
     )
 
     if (!result.success) {
@@ -284,6 +308,7 @@ function PointageQRCode({ user }) {
           <label>Classe</label>
           <select
             value={selectedClasse}
+            disabled={role === 'delegue'}
             onChange={(e) => {
               setSelectedClasse(e.target.value)
               setSelectedSeanceId(null)
@@ -391,7 +416,10 @@ function PointageQRCode({ user }) {
                 </small>
               </div>
 
-              <FakeQRCode seance={selectedSeance} active={generatedQr[selectedSeance.id]} />
+              <FakeQRCode
+                seance={selectedSeance}
+                active={generatedQr[selectedSeance.id]}
+              />
 
               <div className="qr-token-box">
                 QR-{selectedSeance.id}-{selectedSeance.weekKey}
@@ -583,7 +611,7 @@ function detectTeacherScanStatus(seance) {
   const currentMinutes = now.getHours() * 60 + now.getMinutes()
   const lateLimit = parsed.start + 15
 
-  if (currentMinutes > lateLimit && currentMinutes < parsed.end) {
+  if (currentMinutes > lateLimit) {
     return 'retard'
   }
 
@@ -617,9 +645,9 @@ function getRoleDescription(role) {
     surveillant:
       'Vous contrôlez les pointages et confirmez les retards ou absences.',
     enseignant:
-      'Vous pouvez scanner le QR-Code pour valider votre présence. Le retard peut être détecté automatiquement.',
+      'Vous voyez seulement vos cours et vous scannez le QR-Code pour valider votre présence.',
     delegue:
-      'Vous pouvez signaler un retard ou une absence de professeur au surveillant.',
+      'Vous voyez seulement votre classe et vous pouvez signaler un retard ou une absence de professeur.',
     comptable:
       'Le comptable n’intervient pas dans le pointage QR-Code.',
   }
