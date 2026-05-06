@@ -93,7 +93,16 @@ function list_schedule($pdo) {
         ->fetchAll();
 
     $enseignants = $pdo
-        ->query("SELECT id, nom, prenom, email, CONCAT(nom, ' ', prenom) AS nom_complet FROM enseignants ORDER BY nom, prenom")
+        ->query("
+            SELECT 
+                id,
+                nom,
+                prenom,
+                email,
+                CONCAT(nom, ' ', prenom) AS nom_complet
+            FROM enseignants
+            ORDER BY nom, prenom
+        ")
         ->fetchAll();
 
     $matieres = $pdo
