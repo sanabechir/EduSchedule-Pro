@@ -8,7 +8,7 @@ import {
 import { getClassNameFromUser, getTeacherNameFromUser } from '../services/userScope'
 import { exportHtmlToPdf } from '../services/pdfExport'
 
-const API_BASE = 'http://localhost/EduSchedule-Pro/backend/api'
+const API_BASE = 'http://127.0.0.1/EduSchedule-Pro/backend/api'
 
 const EMPTY_FORM = {
   classe: '',
