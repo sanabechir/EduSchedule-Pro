@@ -1,35 +1,28 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import './EmploiTempsISGE.css'
 import {
-  DEFAULT_CLASSES,
   DEFAULT_WEEK_KEY,
   WEEK_OPTIONS,
   formatSlot,
-  useAppStore,
 } from '../services/appStore'
 import { getClassNameFromUser, getTeacherNameFromUser } from '../services/userScope'
 import { exportHtmlToPdf } from '../services/pdfExport'
 
+const API_BASE = 'http://localhost/EduSchedule-Pro/backend/api'
+
 const EMPTY_FORM = {
-  classe: 'Licence 1 RIT',
-  matiere: 'Programmation Web',
-  enseignant: 'TRAORE Jean',
+  classe: '',
+  matiere: '',
+  enseignant: '',
   jour: 'Lundi',
-  horaire: '07h30-09h30',
-  salle: 'A101',
+  horaire: '',
+  salle: '',
   type: 'cours',
 }
 
-const HORAIRES = [
-  '07h30-09h30',
-  '10h00-12h15',
-  '13h00-16h00',
-  '15h00-18h00',
-]
+const DAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi']
 
 function EmploiTempsISGE({ user }) {
-  const { store, actions } = useAppStore()
-
   const role = user?.role || 'admin'
   const teacherName = getTeacherNameFromUser(user)
   const delegateClass = getClassNameFromUser(user)
@@ -41,54 +34,117 @@ function EmploiTempsISGE({ user }) {
   const [selectedTeacher, setSelectedTeacher] = useState(
     role === 'enseignant' && teacherName ? teacherName : 'Tous',
   )
+
   const [form, setForm] = useState(EMPTY_FORM)
   const [showForm, setShowForm] = useState(false)
   const [message, setMessage] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const [apiData, setApiData] = useState({
+    seances: [],
+    classes: [],
+    enseignants: [],
+    matieres: [],
+    salles: [],
+    horaires: [],
+  })
 
   const week =
     WEEK_OPTIONS.find((item) => item.key === selectedWeek) || WEEK_OPTIONS[0]
 
   const canManage = role === 'admin'
 
-  const seancesData = store.seances || []
+  const loadSchedule = async () => {
+    try {
+      setLoading(true)
+      setError('')
+
+      const res = await fetch(`${API_BASE}/schedule.php?action=list`, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+      })
+
+      const text = await res.text()
+
+      let json
+
+      try {
+        json = JSON.parse(text)
+      } catch {
+        throw new Error(`Réponse API invalide : ${text.slice(0, 180)}`)
+      }
+
+      if (!json.success) {
+        throw new Error(json.message || 'Erreur lors du chargement.')
+      }
+
+      setApiData({
+        seances: json.data?.seances || [],
+        classes: json.data?.classes || [],
+        enseignants: json.data?.enseignants || [],
+        matieres: json.data?.matieres || [],
+        salles: json.data?.salles || [],
+        horaires: json.data?.horaires || [],
+      })
+    } catch (err) {
+      setError(err.message || 'Impossible de charger l’emploi du temps.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadSchedule()
+  }, [])
 
   const classes = useMemo(() => {
-    const unique = [
-      ...new Set([
-        ...DEFAULT_CLASSES,
-        ...seancesData.map((item) => item.classe).filter(Boolean),
-      ]),
-    ]
-
-    return ['Toutes', ...unique]
-  }, [seancesData])
+    const names = uniqueValues(apiData.classes.map((item) => item.nom))
+    return ['Toutes', ...names]
+  }, [apiData.classes])
 
   const teachers = useMemo(() => {
-    const unique = [
-      ...new Set(seancesData.map((item) => item.enseignant).filter(Boolean)),
-    ]
+    const names = uniqueValues(
+      apiData.enseignants.map(
+        (item) => item.nom_complet || `${item.nom} ${item.prenom}`,
+      ),
+    )
 
-    return ['Tous', ...unique]
-  }, [seancesData])
+    return ['Tous', ...names]
+  }, [apiData.enseignants])
 
   const subjects = useMemo(() => {
-    return [
-      ...new Set(seancesData.map((item) => item.matiere).filter(Boolean)),
-    ]
-  }, [seancesData])
+    const selectedClass = apiData.classes.find(
+      (item) => item.nom === form.classe,
+    )
+
+    const filtered = apiData.matieres.filter((item) => {
+      if (!selectedClass) return true
+      return Number(item.classe_id) === Number(selectedClass.id)
+    })
+
+    return uniqueValues(filtered.map((item) => item.nom))
+  }, [apiData.matieres, apiData.classes, form.classe])
 
   const rooms = useMemo(() => {
-    return [
-      ...new Set(seancesData.map((item) => item.salle).filter(Boolean)),
-    ]
-  }, [seancesData])
+    return uniqueValues(apiData.salles.map((item) => item.nom))
+  }, [apiData.salles])
+
+  const horaires = useMemo(() => {
+    const all = uniqueValues(apiData.horaires.map((item) => item.label))
+    return sortHoraires(all)
+  }, [apiData.horaires])
 
   const filteredSeances = useMemo(() => {
-    return seancesData
-      .filter((seance) => seance.weekKey === selectedWeek)
+    return (apiData.seances || [])
       .filter((seance) => {
         if (role === 'enseignant' && teacherName) {
-          return seance.enseignant === teacherName
+          return (
+            seance.enseignant === teacherName ||
+            seance.enseignant_email === user?.email
+          )
         }
 
         if (role === 'delegue' && delegateClass) {
@@ -106,28 +162,27 @@ function EmploiTempsISGE({ user }) {
           : seance.enseignant === selectedTeacher,
       )
       .sort((a, b) => {
-        const dayA = week.days.findIndex((day) => day.key === a.jour)
-        const dayB = week.days.findIndex((day) => day.key === b.jour)
+        const dayA = DAYS.indexOf(a.jour)
+        const dayB = DAYS.indexOf(b.jour)
 
         if (dayA !== dayB) return dayA - dayB
 
-        return a.horaire.localeCompare(b.horaire)
+        return compareHoraire(a.horaire, b.horaire)
       })
   }, [
-    seancesData,
-    selectedWeek,
+    apiData.seances,
     selectedClasse,
     selectedTeacher,
     role,
     teacherName,
     delegateClass,
-    week.days,
+    user?.email,
   ])
 
   const visibleClasses = useMemo(() => {
-    const filteredClassNames = [
-      ...new Set(filteredSeances.map((item) => item.classe).filter(Boolean)),
-    ]
+    const filteredClassNames = uniqueValues(
+      filteredSeances.map((item) => item.classe),
+    )
 
     if (selectedClasse !== 'Toutes') {
       return [selectedClasse]
@@ -137,17 +192,45 @@ function EmploiTempsISGE({ user }) {
       return filteredClassNames
     }
 
-    const extraClasses = filteredClassNames.filter(
-      (classe) => !DEFAULT_CLASSES.includes(classe),
-    )
+    return uniqueValues(apiData.classes.map((item) => item.nom))
+  }, [
+    filteredSeances,
+    selectedClasse,
+    selectedTeacher,
+    role,
+    apiData.classes,
+  ])
 
-    return [...DEFAULT_CLASSES, ...extraClasses]
-  }, [filteredSeances, selectedClasse, selectedTeacher, role])
+  const visibleHoraires = useMemo(() => {
+    const used = uniqueValues(filteredSeances.map((item) => item.horaire))
+    const merged = uniqueValues([...horaires, ...used])
+
+    return sortHoraires(merged)
+  }, [filteredSeances, horaires])
 
   const updateForm = (field, value) => {
     setForm((current) => ({
       ...current,
       [field]: value,
+    }))
+  }
+
+  const updateClasseInForm = (classeName) => {
+    const selectedClass = apiData.classes.find(
+      (classe) => classe.nom === classeName,
+    )
+
+    const firstSubject =
+      apiData.matieres.find((item) => item.classe === classeName)?.nom ||
+      apiData.matieres.find(
+        (item) => selectedClass && Number(item.classe_id) === Number(selectedClass.id),
+      )?.nom ||
+      ''
+
+    setForm((current) => ({
+      ...current,
+      classe: classeName,
+      matiere: firstSubject,
     }))
   }
 
@@ -164,38 +247,42 @@ function EmploiTempsISGE({ user }) {
       return
     }
 
+    const firstClass =
+      selectedClasse !== 'Toutes'
+        ? selectedClasse
+        : apiData.classes[0]?.nom || ''
+
+    const selectedClass = apiData.classes.find(
+      (classe) => classe.nom === firstClass,
+    )
+
+    const firstTeacher =
+      selectedTeacher !== 'Tous'
+        ? selectedTeacher
+        : teachers.find((item) => item !== 'Tous') || ''
+
+    const firstSubject =
+      apiData.matieres.find((item) => item.classe === firstClass)?.nom ||
+      apiData.matieres.find(
+        (item) => selectedClass && Number(item.classe_id) === Number(selectedClass.id),
+      )?.nom ||
+      ''
+
     setForm({
-      ...EMPTY_FORM,
-      classe:
-        selectedClasse !== 'Toutes'
-          ? selectedClasse
-          : EMPTY_FORM.classe,
-      enseignant:
-        selectedTeacher !== 'Tous'
-          ? selectedTeacher
-          : EMPTY_FORM.enseignant,
+      classe: firstClass,
+      matiere: firstSubject,
+      enseignant: firstTeacher,
       jour: week.days[0]?.key || 'Lundi',
+      horaire: horaires[0] || '07h30-09h30',
+      salle: rooms[0] || '',
+      type: 'cours',
     })
 
     setShowForm(true)
     setMessage('')
   }
 
-  const hasConflict = (payload) => {
-    return seancesData.some((seance) => {
-      if (seance.weekKey !== payload.weekKey) return false
-      if (seance.jour !== payload.jour) return false
-      if (seance.horaire !== payload.horaire) return false
-
-      const sameRoom = seance.salle === payload.salle
-      const sameTeacher = seance.enseignant === payload.enseignant
-      const sameClass = seance.classe === payload.classe
-
-      return sameRoom || sameTeacher || sameClass
-    })
-  }
-
-  const submitSeance = () => {
+  const submitSeance = async () => {
     if (!canManage) {
       setMessage('Action non autorisée.')
       return
@@ -213,43 +300,39 @@ function EmploiTempsISGE({ user }) {
       return
     }
 
-    const payload = {
-      ...form,
-      weekKey: selectedWeek,
-      type: form.type || 'cours',
-    }
+    try {
+      const res = await fetch(`${API_BASE}/schedule.php?action=create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(form),
+      })
 
-    if (hasConflict(payload)) {
-      setMessage(
-        'Conflit détecté : même classe, même professeur ou même salle sur ce créneau.',
-      )
-      return
-    }
+      const text = await res.text()
 
-    if (actions.addSeance) {
-      const result = actions.addSeance(payload)
+      let json
 
-      if (result && result.success === false) {
-        setMessage(result.message || 'Impossible d’ajouter la séance.')
+      try {
+        json = JSON.parse(text)
+      } catch {
+        throw new Error(`Réponse API invalide : ${text.slice(0, 180)}`)
+      }
+
+      if (!json.success) {
+        setMessage(json.message || 'Impossible d’ajouter la séance.')
         return
       }
-    } else if (actions.createSeance) {
-      const result = actions.createSeance(payload)
 
-      if (result && result.success === false) {
-        setMessage(result.message || 'Impossible d’ajouter la séance.')
-        return
-      }
-    } else {
-      setMessage('Action addSeance introuvable dans appStore.')
-      return
+      setShowForm(false)
+      setMessage('Séance ajoutée avec succès.')
+      await loadSchedule()
+    } catch (err) {
+      setMessage(err.message || 'Erreur lors de l’ajout de la séance.')
     }
-
-    setShowForm(false)
-    setMessage('Séance ajoutée avec succès.')
   }
 
-  const deleteSeance = (seanceId) => {
+  const deleteSeance = async (seanceId) => {
     if (!canManage) {
       setMessage('Seul l’administrateur peut supprimer une séance.')
       return
@@ -259,26 +342,35 @@ function EmploiTempsISGE({ user }) {
 
     if (!confirmed) return
 
-    if (actions.deleteSeance) {
-      const result = actions.deleteSeance(seanceId)
+    try {
+      const res = await fetch(`${API_BASE}/schedule.php?action=delete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ id: seanceId }),
+      })
 
-      if (result && result.success === false) {
-        setMessage(result.message || 'Impossible de supprimer la séance.')
+      const text = await res.text()
+
+      let json
+
+      try {
+        json = JSON.parse(text)
+      } catch {
+        throw new Error(`Réponse API invalide : ${text.slice(0, 180)}`)
+      }
+
+      if (!json.success) {
+        setMessage(json.message || 'Impossible de supprimer la séance.')
         return
       }
-    } else if (actions.removeSeance) {
-      const result = actions.removeSeance(seanceId)
 
-      if (result && result.success === false) {
-        setMessage(result.message || 'Impossible de supprimer la séance.')
-        return
-      }
-    } else {
-      setMessage('Action deleteSeance introuvable dans appStore.')
-      return
+      setMessage('Séance supprimée.')
+      await loadSchedule()
+    } catch (err) {
+      setMessage(err.message || 'Erreur lors de la suppression.')
     }
-
-    setMessage('Séance supprimée.')
   }
 
   const getSeancesForCell = (classe, jour, horaire) => {
@@ -296,7 +388,12 @@ function EmploiTempsISGE({ user }) {
         .map(
           (classe) => `
             <div class="pdf-page">
-              ${buildClassSchedulePdf(classe, week, getSeancesForCell)}
+              ${buildClassSchedulePdf(
+                classe,
+                week,
+                visibleHoraires,
+                getSeancesForCell,
+              )}
             </div>
           `,
         )
@@ -319,7 +416,8 @@ function EmploiTempsISGE({ user }) {
         <div>
           <h1>Emploi du temps</h1>
           <p>
-            Vue hebdomadaire par classe, jour et horaire.
+            Données chargées depuis MySQL : classes, professeurs, modules,
+            salles et horaires.
           </p>
         </div>
 
@@ -393,6 +491,10 @@ function EmploiTempsISGE({ user }) {
         </button>
       </div>
 
+      {loading && <div className="emploi-message">Chargement depuis MySQL...</div>}
+
+      {error && <div className="emploi-message error">{error}</div>}
+
       {message && <div className="emploi-message">{message}</div>}
 
       {showForm && (
@@ -407,11 +509,12 @@ function EmploiTempsISGE({ user }) {
               <label>Classe</label>
               <select
                 value={form.classe}
-                onChange={(e) => updateForm('classe', e.target.value)}
+                onChange={(e) => updateClasseInForm(e.target.value)}
               >
-                {DEFAULT_CLASSES.map((classe) => (
-                  <option key={classe} value={classe}>
-                    {classe}
+                <option value="">Choisir une classe</option>
+                {apiData.classes.map((classe) => (
+                  <option key={classe.id} value={classe.nom}>
+                    {classe.nom}
                   </option>
                 ))}
               </select>
@@ -419,32 +522,34 @@ function EmploiTempsISGE({ user }) {
 
             <div className="isge-filter">
               <label>Matière</label>
-              <input
+              <select
                 value={form.matiere}
-                list="matiere-list"
                 onChange={(e) => updateForm('matiere', e.target.value)}
-              />
-              <datalist id="matiere-list">
+              >
+                <option value="">Choisir une matière</option>
                 {subjects.map((subject) => (
-                  <option key={subject} value={subject} />
+                  <option key={subject} value={subject}>
+                    {subject}
+                  </option>
                 ))}
-              </datalist>
+              </select>
             </div>
 
             <div className="isge-filter">
               <label>Professeur</label>
-              <input
+              <select
                 value={form.enseignant}
-                list="teacher-list"
                 onChange={(e) => updateForm('enseignant', e.target.value)}
-              />
-              <datalist id="teacher-list">
+              >
+                <option value="">Choisir un professeur</option>
                 {teachers
                   .filter((teacher) => teacher !== 'Tous')
                   .map((teacher) => (
-                    <option key={teacher} value={teacher} />
+                    <option key={teacher} value={teacher}>
+                      {teacher}
+                    </option>
                   ))}
-              </datalist>
+              </select>
             </div>
 
             <div className="isge-filter">
@@ -467,7 +572,8 @@ function EmploiTempsISGE({ user }) {
                 value={form.horaire}
                 onChange={(e) => updateForm('horaire', e.target.value)}
               >
-                {HORAIRES.map((horaire) => (
+                <option value="">Choisir un horaire</option>
+                {horaires.map((horaire) => (
                   <option key={horaire} value={horaire}>
                     {formatSlot(horaire)}
                   </option>
@@ -477,16 +583,17 @@ function EmploiTempsISGE({ user }) {
 
             <div className="isge-filter">
               <label>Salle</label>
-              <input
+              <select
                 value={form.salle}
-                list="room-list"
                 onChange={(e) => updateForm('salle', e.target.value)}
-              />
-              <datalist id="room-list">
+              >
+                <option value="">Choisir une salle</option>
                 {rooms.map((room) => (
-                  <option key={room} value={room} />
+                  <option key={room} value={room}>
+                    {room}
+                  </option>
                 ))}
-              </datalist>
+              </select>
             </div>
 
             <div className="isge-filter">
@@ -498,7 +605,6 @@ function EmploiTempsISGE({ user }) {
                 <option value="cours">Cours</option>
                 <option value="td">TD</option>
                 <option value="tp">TP</option>
-                <option value="examen">Examen</option>
               </select>
             </div>
           </div>
@@ -521,13 +627,14 @@ function EmploiTempsISGE({ user }) {
             key={classe}
             classe={classe}
             week={week}
+            horaires={visibleHoraires}
             canManage={canManage}
             getSeancesForCell={getSeancesForCell}
             onDelete={deleteSeance}
           />
         ))}
 
-        {visibleClasses.length === 0 && (
+        {!loading && visibleClasses.length === 0 && (
           <section className="panel emploi-empty-panel">
             Aucun emploi du temps disponible pour ce filtre.
           </section>
@@ -540,6 +647,7 @@ function EmploiTempsISGE({ user }) {
 function ClassScheduleTable({
   classe,
   week,
+  horaires,
   canManage,
   getSeancesForCell,
   onDelete,
@@ -552,9 +660,7 @@ function ClassScheduleTable({
           <h2>{classe}</h2>
         </div>
 
-        <div className="emploi-class-badge">
-          {week.label}
-        </div>
+        <div className="emploi-class-badge">{week.label}</div>
       </div>
 
       <div className="emploi-table-wrap">
@@ -569,7 +675,7 @@ function ClassScheduleTable({
           </thead>
 
           <tbody>
-            {HORAIRES.map((horaire) => (
+            {horaires.map((horaire) => (
               <tr key={`${classe}-${horaire}`}>
                 <td className="horaire-cell">{formatSlot(horaire)}</td>
 
@@ -610,7 +716,7 @@ function ClassScheduleTable({
   )
 }
 
-function buildClassSchedulePdf(classe, week, getSeancesForCell) {
+function buildClassSchedulePdf(classe, week, horaires, getSeancesForCell) {
   return `
     <style>
       .pdf-class-block {
@@ -658,7 +764,7 @@ function buildClassSchedulePdf(classe, week, getSeancesForCell) {
       }
 
       .pdf-schedule-table td {
-        height: 82px;
+        height: 70px;
         padding: 7px;
         border: 1px solid #e5e7eb;
         vertical-align: top;
@@ -730,7 +836,7 @@ function buildClassSchedulePdf(classe, week, getSeancesForCell) {
         </thead>
 
         <tbody>
-          ${HORAIRES.map((horaire) => {
+          ${horaires.map((horaire) => {
             return `
               <tr>
                 <td class="time-cell">${escapeHtml(formatSlot(horaire))}</td>
@@ -769,6 +875,28 @@ function buildClassSchedulePdf(classe, week, getSeancesForCell) {
       </table>
     </div>
   `
+}
+
+function uniqueValues(values) {
+  return [...new Set(values.filter(Boolean))]
+}
+
+function compareHoraire(a, b) {
+  return getHoraireStart(a) - getHoraireStart(b)
+}
+
+function sortHoraires(values) {
+  return [...values].sort(compareHoraire)
+}
+
+function getHoraireStart(value) {
+  const match = String(value || '').match(/^(\d{1,2})h?(\d{2})?/)
+  if (!match) return 9999
+
+  const hours = Number(match[1] || 0)
+  const minutes = Number(match[2] || 0)
+
+  return hours * 60 + minutes
 }
 
 function escapeHtml(value) {
