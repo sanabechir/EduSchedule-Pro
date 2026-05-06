@@ -7,6 +7,10 @@ import {
 } from '../services/appStore'
 import { getClassNameFromUser, getTeacherNameFromUser } from '../services/userScope'
 import { exportHtmlToPdf } from '../services/pdfExport'
+import {
+  getHolidayForWeekDay,
+  getIsoForWeekDay,
+} from '../services/burkinaHolidays'
 
 const API_BASE = 'http://127.0.0.1/EduSchedule-Pro/backend/api'
 
@@ -21,6 +25,27 @@ const EMPTY_FORM = {
 }
 
 const DAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi']
+
+const MAIN_TIME_ROWS = [
+  {
+    id: 'matin-1',
+    label: '07h30 à 09h30',
+    start: 7 * 60 + 30,
+    end: 9 * 60 + 30,
+  },
+  {
+    id: 'matin-2',
+    label: '10h à 12h15',
+    start: 10 * 60,
+    end: 12 * 60 + 15,
+  },
+  {
+    id: 'apres-midi',
+    label: '15h à 18h',
+    start: 15 * 60,
+    end: 18 * 60,
+  },
+]
 
 function EmploiTempsISGE({ user }) {
   const role = user?.role || 'admin'
@@ -54,6 +79,7 @@ function EmploiTempsISGE({ user }) {
     WEEK_OPTIONS.find((item) => item.key === selectedWeek) || WEEK_OPTIONS[0]
 
   const canManage = role === 'admin'
+  const timeRows = MAIN_TIME_ROWS
 
   const loadSchedule = async () => {
     try {
@@ -115,19 +141,6 @@ function EmploiTempsISGE({ user }) {
     return ['Tous', ...names]
   }, [apiData.enseignants])
 
-  const subjects = useMemo(() => {
-    const selectedClass = apiData.classes.find(
-      (item) => item.nom === form.classe,
-    )
-
-    const filtered = apiData.matieres.filter((item) => {
-      if (!selectedClass) return true
-      return Number(item.classe_id) === Number(selectedClass.id)
-    })
-
-    return uniqueValues(filtered.map((item) => item.nom))
-  }, [apiData.matieres, apiData.classes, form.classe])
-
   const rooms = useMemo(() => {
     return uniqueValues(apiData.salles.map((item) => item.nom))
   }, [apiData.salles])
@@ -136,6 +149,43 @@ function EmploiTempsISGE({ user }) {
     const all = uniqueValues(apiData.horaires.map((item) => item.label))
     return sortHoraires(all)
   }, [apiData.horaires])
+
+  const subjects = useMemo(() => {
+    const selectedClass = apiData.classes.find(
+      (item) => item.nom === form.classe,
+    )
+
+    const teacherSubjects = apiData.seances
+      .filter((seance) => {
+        const sameTeacher = form.enseignant
+          ? seance.enseignant === form.enseignant
+          : true
+
+        const sameClass = form.classe
+          ? seance.classe === form.classe
+          : true
+
+        return sameTeacher && sameClass
+      })
+      .map((seance) => seance.matiere)
+
+    if (teacherSubjects.length > 0) {
+      return uniqueValues(teacherSubjects)
+    }
+
+    const filtered = apiData.matieres.filter((item) => {
+      if (!selectedClass) return true
+      return Number(item.classe_id) === Number(selectedClass.id)
+    })
+
+    return uniqueValues(filtered.map((item) => item.nom))
+  }, [
+    apiData.matieres,
+    apiData.classes,
+    apiData.seances,
+    form.classe,
+    form.enseignant,
+  ])
 
   const filteredSeances = useMemo(() => {
     return (apiData.seances || [])
@@ -201,13 +251,6 @@ function EmploiTempsISGE({ user }) {
     apiData.classes,
   ])
 
-  const visibleHoraires = useMemo(() => {
-    const used = uniqueValues(filteredSeances.map((item) => item.horaire))
-    const merged = uniqueValues([...horaires, ...used])
-
-    return sortHoraires(merged)
-  }, [filteredSeances, horaires])
-
   const updateForm = (field, value) => {
     setForm((current) => ({
       ...current,
@@ -215,22 +258,65 @@ function EmploiTempsISGE({ user }) {
     }))
   }
 
-  const updateClasseInForm = (classeName) => {
+  const getFirstSubjectFor = (classeName, teacherNameValue) => {
+    const teacherClassSubject = apiData.seances.find((seance) => {
+      const sameClass = classeName ? seance.classe === classeName : true
+      const sameTeacher = teacherNameValue
+        ? seance.enseignant === teacherNameValue
+        : true
+
+      return sameClass && sameTeacher
+    })
+
+    if (teacherClassSubject?.matiere) {
+      return teacherClassSubject.matiere
+    }
+
     const selectedClass = apiData.classes.find(
       (classe) => classe.nom === classeName,
     )
 
-    const firstSubject =
-      apiData.matieres.find((item) => item.classe === classeName)?.nom ||
-      apiData.matieres.find(
-        (item) => selectedClass && Number(item.classe_id) === Number(selectedClass.id),
-      )?.nom ||
-      ''
+    const classSubject = apiData.matieres.find((item) => {
+      return selectedClass && Number(item.classe_id) === Number(selectedClass.id)
+    })
 
+    return classSubject?.nom || ''
+  }
+
+  const updateClasseInForm = (classeName) => {
     setForm((current) => ({
       ...current,
       classe: classeName,
-      matiere: firstSubject,
+      matiere: getFirstSubjectFor(classeName, current.enseignant),
+    }))
+  }
+
+  const updateTeacherInForm = (teacherNameValue) => {
+    if (!teacherNameValue) {
+      setForm((current) => ({
+        ...current,
+        enseignant: '',
+        matiere: getFirstSubjectFor(current.classe, ''),
+      }))
+      return
+    }
+
+    const teacherSeances = apiData.seances.filter(
+      (seance) => seance.enseignant === teacherNameValue,
+    )
+
+    const compatibleWithCurrentClass = form.classe
+      ? teacherSeances.filter((seance) => seance.classe === form.classe)
+      : teacherSeances
+
+    const source = compatibleWithCurrentClass[0] || teacherSeances[0]
+
+    setForm((current) => ({
+      ...current,
+      enseignant: teacherNameValue,
+      classe: source?.classe || current.classe,
+      matiere:
+        source?.matiere || getFirstSubjectFor(current.classe, teacherNameValue),
     }))
   }
 
@@ -252,27 +338,23 @@ function EmploiTempsISGE({ user }) {
         ? selectedClasse
         : apiData.classes[0]?.nom || ''
 
-    const selectedClass = apiData.classes.find(
-      (classe) => classe.nom === firstClass,
-    )
-
     const firstTeacher =
       selectedTeacher !== 'Tous'
         ? selectedTeacher
         : teachers.find((item) => item !== 'Tous') || ''
 
-    const firstSubject =
-      apiData.matieres.find((item) => item.classe === firstClass)?.nom ||
-      apiData.matieres.find(
-        (item) => selectedClass && Number(item.classe_id) === Number(selectedClass.id),
-      )?.nom ||
-      ''
+    const firstSubject = getFirstSubjectFor(firstClass, firstTeacher)
+
+    const firstAvailableDay =
+      week.days.find((day, index) => {
+        return !getHolidayForWeekDay(week, selectedWeek, index)
+      })?.key || 'Lundi'
 
     setForm({
       classe: firstClass,
       matiere: firstSubject,
       enseignant: firstTeacher,
-      jour: week.days[0]?.key || 'Lundi',
+      jour: firstAvailableDay,
       horaire: horaires[0] || '07h30-09h30',
       salle: rooms[0] || '',
       type: 'cours',
@@ -297,6 +379,16 @@ function EmploiTempsISGE({ user }) {
       !form.salle
     ) {
       setMessage('Tous les champs de la séance sont obligatoires.')
+      return
+    }
+
+    const selectedDayIndex = week.days.findIndex((day) => day.key === form.jour)
+    const holiday = getHolidayForWeekDay(week, selectedWeek, selectedDayIndex)
+
+    if (holiday) {
+      setMessage(
+        `Impossible d’ajouter une séance le ${form.jour} : ${holiday.name}.`,
+      )
       return
     }
 
@@ -373,13 +465,21 @@ function EmploiTempsISGE({ user }) {
     }
   }
 
-  const getSeancesForCell = (classe, jour, horaire) => {
-    return filteredSeances.filter(
-      (seance) =>
-        seance.classe === classe &&
-        seance.jour === jour &&
-        seance.horaire === horaire,
-    )
+  const getSeancesForCell = (classe, jour, timeRow, dayIndex) => {
+    const holiday = getHolidayForWeekDay(week, selectedWeek, dayIndex)
+
+    if (holiday) {
+      return []
+    }
+
+    return filteredSeances.filter((seance) => {
+      if (seance.classe !== classe) return false
+      if (seance.jour !== jour) return false
+
+      const row = getMainTimeRowForHoraire(seance.horaire)
+
+      return row?.id === timeRow.id
+    })
   }
 
   const exportSchedulePdf = () => {
@@ -391,7 +491,8 @@ function EmploiTempsISGE({ user }) {
               ${buildClassSchedulePdf(
                 classe,
                 week,
-                visibleHoraires,
+                selectedWeek,
+                timeRows,
                 getSeancesForCell,
               )}
             </div>
@@ -417,7 +518,7 @@ function EmploiTempsISGE({ user }) {
           <h1>Emploi du temps</h1>
           <p>
             Données chargées depuis MySQL : classes, professeurs, modules,
-            salles et horaires.
+            salles, horaires et jours fériés du Burkina Faso.
           </p>
         </div>
 
@@ -521,6 +622,23 @@ function EmploiTempsISGE({ user }) {
             </div>
 
             <div className="isge-filter">
+              <label>Professeur</label>
+              <select
+                value={form.enseignant}
+                onChange={(e) => updateTeacherInForm(e.target.value)}
+              >
+                <option value="">Choisir un professeur</option>
+                {teachers
+                  .filter((teacher) => teacher !== 'Tous')
+                  .map((teacher) => (
+                    <option key={teacher} value={teacher}>
+                      {teacher}
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            <div className="isge-filter">
               <label>Matière</label>
               <select
                 value={form.matiere}
@@ -536,38 +654,30 @@ function EmploiTempsISGE({ user }) {
             </div>
 
             <div className="isge-filter">
-              <label>Professeur</label>
-              <select
-                value={form.enseignant}
-                onChange={(e) => updateForm('enseignant', e.target.value)}
-              >
-                <option value="">Choisir un professeur</option>
-                {teachers
-                  .filter((teacher) => teacher !== 'Tous')
-                  .map((teacher) => (
-                    <option key={teacher} value={teacher}>
-                      {teacher}
-                    </option>
-                  ))}
-              </select>
-            </div>
-
-            <div className="isge-filter">
               <label>Jour</label>
               <select
                 value={form.jour}
                 onChange={(e) => updateForm('jour', e.target.value)}
               >
-                {week.days.map((day) => (
-                  <option key={day.key} value={day.key}>
-                    {day.label}
-                  </option>
-                ))}
+                {week.days.map((day, dayIndex) => {
+                  const holiday = getHolidayForWeekDay(week, selectedWeek, dayIndex)
+
+                  return (
+                    <option
+                      key={day.key}
+                      value={day.key}
+                      disabled={Boolean(holiday)}
+                    >
+                      {day.label}
+                      {holiday ? ` — ${holiday.name}` : ''}
+                    </option>
+                  )
+                })}
               </select>
             </div>
 
             <div className="isge-filter">
-              <label>Horaire</label>
+              <label>Horaire réel</label>
               <select
                 value={form.horaire}
                 onChange={(e) => updateForm('horaire', e.target.value)}
@@ -627,7 +737,8 @@ function EmploiTempsISGE({ user }) {
             key={classe}
             classe={classe}
             week={week}
-            horaires={visibleHoraires}
+            selectedWeek={selectedWeek}
+            timeRows={timeRows}
             canManage={canManage}
             getSeancesForCell={getSeancesForCell}
             onDelete={deleteSeance}
@@ -647,7 +758,8 @@ function EmploiTempsISGE({ user }) {
 function ClassScheduleTable({
   classe,
   week,
-  horaires,
+  selectedWeek,
+  timeRows,
   canManage,
   getSeancesForCell,
   onDelete,
@@ -664,41 +776,95 @@ function ClassScheduleTable({
       </div>
 
       <div className="emploi-table-wrap">
-        <table className="emploi-table">
+        <table className="emploi-table emploi-table-clean">
           <thead>
             <tr>
               <th>Horaire</th>
-              {week.days.map((day) => (
-                <th key={day.key}>{day.label}</th>
-              ))}
+
+              {week.days.map((day, dayIndex) => {
+                const holiday = getHolidayForWeekDay(week, selectedWeek, dayIndex)
+
+                return (
+                  <th
+                    key={day.key}
+                    className={holiday ? 'holiday-head' : ''}
+                  >
+                    {day.label}
+                    {holiday && <span>{holiday.name}</span>}
+                    {holiday?.tentative && <small>Date indicative</small>}
+                  </th>
+                )
+              })}
             </tr>
           </thead>
 
           <tbody>
-            {horaires.map((horaire) => (
-              <tr key={`${classe}-${horaire}`}>
-                <td className="horaire-cell">{formatSlot(horaire)}</td>
+            {timeRows.map((timeRow, rowIndex) => (
+              <tr key={`${classe}-${timeRow.id}`}>
+                <td className="horaire-cell main-time-cell">
+                  {timeRow.label}
+                </td>
 
-                {week.days.map((day) => {
-                  const seances = getSeancesForCell(classe, day.key, horaire)
+                {week.days.map((day, dayIndex) => {
+                  const holiday = getHolidayForWeekDay(week, selectedWeek, dayIndex)
+
+                  if (holiday && rowIndex > 0) {
+                    return null
+                  }
+
+                  if (holiday && rowIndex === 0) {
+                    return (
+                      <td
+                        key={`${classe}-${day.key}-${timeRow.id}`}
+                        className="holiday-cell holiday-cell-merged"
+                        rowSpan={timeRows.length}
+                      >
+                        <div className="holiday-big-card">
+                          <strong>Férié</strong>
+                          <span>{holiday.name}</span>
+                          <small>Aucun cours</small>
+                        </div>
+                      </td>
+                    )
+                  }
+
+                  const seances = getSeancesForCell(
+                    classe,
+                    day.key,
+                    timeRow,
+                    dayIndex,
+                  )
 
                   return (
-                    <td key={`${classe}-${day.key}-${horaire}`}>
+                    <td key={`${classe}-${day.key}-${timeRow.id}`}>
                       <div className="emploi-cell-stack">
-                        {seances.map((seance) => (
-                          <div key={seance.id} className="emploi-course-card">
-                            <strong>{seance.matiere}</strong>
-                            <small>{seance.enseignant}</small>
-                            <small>{seance.salle}</small>
-                            <em>{seance.type?.toUpperCase() || 'COURS'}</em>
+                        {seances.map((seance) => {
+                          const showBracket = shouldShowBracketTime(
+                            seance.horaire,
+                            timeRow,
+                          )
 
-                            {canManage && (
-                              <button onClick={() => onDelete(seance.id)}>
-                                Supprimer
-                              </button>
-                            )}
-                          </div>
-                        ))}
+                          return (
+                            <div key={seance.id} className="emploi-course-card">
+                              {showBracket && (
+                                <span className="course-time-bracket">
+                                  {formatBracketTime(seance.horaire)}
+                                </span>
+                              )}
+
+                              <strong>{seance.matiere}</strong>
+                              <small>{seance.enseignant}</small>
+                              <small>{seance.salle}</small>
+                              <em>{seance.type?.toUpperCase() || 'COURS'}</em>
+
+                              {canManage && (
+                                <button onClick={() => onDelete(seance.id)}>
+                                  Supprimer
+                                </button>
+                              )}
+                            </div>
+                          )
+                        })}
 
                         {seances.length === 0 && (
                           <div className="emploi-empty-cell">—</div>
@@ -716,7 +882,13 @@ function ClassScheduleTable({
   )
 }
 
-function buildClassSchedulePdf(classe, week, horaires, getSeancesForCell) {
+function buildClassSchedulePdf(
+  classe,
+  week,
+  selectedWeek,
+  timeRows,
+  getSeancesForCell,
+) {
   return `
     <style>
       .pdf-class-block {
@@ -763,8 +935,19 @@ function buildClassSchedulePdf(classe, week, horaires, getSeancesForCell) {
         border: 1px solid #dbe3f1;
       }
 
+      .pdf-schedule-table th.pdf-holiday-head {
+        background: #fff7ed;
+        color: #9a3412;
+      }
+
+      .pdf-schedule-table th span {
+        display: block;
+        margin-top: 3px;
+        font-size: 8px;
+      }
+
       .pdf-schedule-table td {
-        height: 70px;
+        height: 96px;
         padding: 7px;
         border: 1px solid #e5e7eb;
         vertical-align: top;
@@ -777,6 +960,7 @@ function buildClassSchedulePdf(classe, week, horaires, getSeancesForCell) {
         color: #0f172a;
         font-weight: 900;
         text-align: center;
+        vertical-align: middle;
       }
 
       .pdf-course {
@@ -785,6 +969,14 @@ function buildClassSchedulePdf(classe, week, horaires, getSeancesForCell) {
         border-radius: 10px;
         background: #f8fafc;
         margin-bottom: 5px;
+      }
+
+      .pdf-course .bracket {
+        display: block;
+        margin-bottom: 4px;
+        color: #111827;
+        font-size: 10px;
+        font-weight: 900;
       }
 
       .pdf-course strong {
@@ -819,6 +1011,21 @@ function buildClassSchedulePdf(classe, week, horaires, getSeancesForCell) {
         text-align: center;
         font-weight: 900;
       }
+
+      .pdf-holiday-cell {
+        background: #d9d9d9 !important;
+        color: #111827;
+        text-align: center;
+        vertical-align: middle !important;
+      }
+
+      .pdf-holiday-cell .ferie {
+        display: inline-block;
+        transform: rotate(-45deg);
+        font-size: 22px;
+        font-weight: 900;
+        letter-spacing: 1px;
+      }
     </style>
 
     <div class="pdf-class-block">
@@ -831,46 +1038,95 @@ function buildClassSchedulePdf(classe, week, horaires, getSeancesForCell) {
         <thead>
           <tr>
             <th>Horaire</th>
-            ${week.days.map((day) => `<th>${escapeHtml(day.label)}</th>`).join('')}
+            ${week.days
+              .map((day, dayIndex) => {
+                const holiday = getHolidayForWeekDay(week, selectedWeek, dayIndex)
+
+                return `
+                  <th class="${holiday ? 'pdf-holiday-head' : ''}">
+                    ${escapeHtml(day.label)}
+                    ${holiday ? `<span>${escapeHtml(holiday.name)}</span>` : ''}
+                  </th>
+                `
+              })
+              .join('')}
           </tr>
         </thead>
 
         <tbody>
-          ${horaires.map((horaire) => {
-            return `
-              <tr>
-                <td class="time-cell">${escapeHtml(formatSlot(horaire))}</td>
-                ${week.days
-                  .map((day) => {
-                    const seances = getSeancesForCell(classe, day.key, horaire)
+          ${timeRows
+            .map((timeRow, rowIndex) => {
+              return `
+                <tr>
+                  <td class="time-cell">${escapeHtml(timeRow.label)}</td>
 
-                    return `
-                      <td>
-                        ${
-                          seances.length > 0
-                            ? seances
-                                .map(
-                                  (seance) => `
-                                    <div class="pdf-course">
-                                      <strong>${escapeHtml(seance.matiere)}</strong>
-                                      <span>${escapeHtml(seance.enseignant)}</span>
-                                      <span>${escapeHtml(seance.salle)}</span>
-                                      <small>${escapeHtml(
-                                        seance.type?.toUpperCase() || 'COURS',
-                                      )}</small>
-                                    </div>
-                                  `,
-                                )
-                                .join('')
-                            : '<div class="pdf-empty">—</div>'
-                        }
-                      </td>
-                    `
-                  })
-                  .join('')}
-              </tr>
-            `
-          }).join('')}
+                  ${week.days
+                    .map((day, dayIndex) => {
+                      const holiday = getHolidayForWeekDay(
+                        week,
+                        selectedWeek,
+                        dayIndex,
+                      )
+
+                      if (holiday && rowIndex > 0) {
+                        return ''
+                      }
+
+                      if (holiday && rowIndex === 0) {
+                        return `
+                          <td class="pdf-holiday-cell" rowspan="${timeRows.length}">
+                            <span class="ferie">Férié</span>
+                          </td>
+                        `
+                      }
+
+                      const seances = getSeancesForCell(
+                        classe,
+                        day.key,
+                        timeRow,
+                        dayIndex,
+                      )
+
+                      return `
+                        <td>
+                          ${
+                            seances.length > 0
+                              ? seances
+                                  .map((seance) => {
+                                    const showBracket = shouldShowBracketTime(
+                                      seance.horaire,
+                                      timeRow,
+                                    )
+
+                                    return `
+                                      <div class="pdf-course">
+                                        ${
+                                          showBracket
+                                            ? `<span class="bracket">${escapeHtml(
+                                                formatBracketTime(seance.horaire),
+                                              )}</span>`
+                                            : ''
+                                        }
+                                        <strong>${escapeHtml(seance.matiere)}</strong>
+                                        <span>${escapeHtml(seance.enseignant)}</span>
+                                        <span>${escapeHtml(seance.salle)}</span>
+                                        <small>${escapeHtml(
+                                          seance.type?.toUpperCase() || 'COURS',
+                                        )}</small>
+                                      </div>
+                                    `
+                                  })
+                                  .join('')
+                              : '<div class="pdf-empty">—</div>'
+                          }
+                        </td>
+                      `
+                    })
+                    .join('')}
+                </tr>
+              `
+            })
+            .join('')}
         </tbody>
       </table>
     </div>
@@ -890,13 +1146,73 @@ function sortHoraires(values) {
 }
 
 function getHoraireStart(value) {
-  const match = String(value || '').match(/^(\d{1,2})h?(\d{2})?/)
-  if (!match) return 9999
+  const parsed = parseHoraire(value)
 
-  const hours = Number(match[1] || 0)
-  const minutes = Number(match[2] || 0)
+  return parsed ? parsed.start : 9999
+}
 
-  return hours * 60 + minutes
+function getMainTimeRowForHoraire(horaire) {
+  const parsed = parseHoraire(horaire)
+
+  if (!parsed) return MAIN_TIME_ROWS[0]
+
+  if (parsed.start < 10 * 60) {
+    return MAIN_TIME_ROWS[0]
+  }
+
+  if (parsed.start < 13 * 60) {
+    return MAIN_TIME_ROWS[1]
+  }
+
+  return MAIN_TIME_ROWS[2]
+}
+
+function parseHoraire(value) {
+  const text = String(value || '')
+    .trim()
+    .replaceAll('[', '')
+    .replaceAll(']', '')
+
+  const match = text.match(
+    /(\d{1,2})h?(\d{2})?\s*[-:à]\s*(\d{1,2})h?(\d{2})?/i,
+  )
+
+  if (!match) return null
+
+  const startHour = Number(match[1] || 0)
+  const startMin = Number(match[2] || 0)
+  const endHour = Number(match[3] || 0)
+  const endMin = Number(match[4] || 0)
+
+  return {
+    start: startHour * 60 + startMin,
+    end: endHour * 60 + endMin,
+  }
+}
+
+function shouldShowBracketTime(horaire, timeRow) {
+  const parsed = parseHoraire(horaire)
+
+  if (!parsed) return false
+
+  return parsed.start !== timeRow.start || parsed.end !== timeRow.end
+}
+
+function formatBracketTime(horaire) {
+  const parsed = parseHoraire(horaire)
+
+  if (!parsed) return `[${String(horaire).toUpperCase()}]`
+
+  return `[${formatMinuteForBracket(parsed.start)} : ${formatMinuteForBracket(
+    parsed.end,
+  )}]`
+}
+
+function formatMinuteForBracket(totalMinutes) {
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+
+  return `${String(hours).padStart(2, '0')}H${String(minutes).padStart(2, '0')}`
 }
 
 function escapeHtml(value) {
