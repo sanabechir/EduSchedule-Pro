@@ -1,680 +1,370 @@
-import { useMemo, useState } from 'react'
-import {
-  DEFAULT_CLASSES,
-  DEFAULT_WEEK_KEY,
-  WEEK_OPTIONS,
-  formatSlot,
-  parseSlot,
-  useAppStore,
-} from '../services/appStore'
-import { getClassNameFromUser, getTeacherNameFromUser } from '../services/userScope'
+import { useEffect, useMemo, useState } from 'react'
+import QRCode from 'qrcode'
+import './PointageQRCode.css'
+import { getTeacherNameFromUser } from '../services/userScope'
+
+const API_URL = 'http://127.0.0.1/EduSchedule-Pro/backend/api/teacher_qr.php'
 
 function PointageQRCode({ user }) {
-  const { store, actions } = useAppStore()
-
   const role = user?.role || 'admin'
-  const permissions = getPermissions(role)
   const teacherName = getTeacherNameFromUser(user)
-  const delegateClass = getClassNameFromUser(user)
+  const canGenerate = ['admin', 'surveillant'].includes(role)
 
-  const [selectedWeek, setSelectedWeek] = useState(DEFAULT_WEEK_KEY)
-  const [selectedClasse, setSelectedClasse] = useState(
-    role === 'delegue' && delegateClass ? delegateClass : 'Toutes',
-  )
-  const [selectedDay, setSelectedDay] = useState('Tous')
-  const [selectedSeanceId, setSelectedSeanceId] = useState(null)
+  const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
-  const [generatedQr, setGeneratedQr] = useState({})
+  const [error, setError] = useState('')
+  const [creneaux, setCreneaux] = useState([])
+  const [presences, setPresences] = useState([])
+  const [tokens, setTokens] = useState([])
 
-  const week = getWeek(selectedWeek)
+  const [form, setForm] = useState({
+    creneau_id: '',
+    date_cours: todayIso(),
+    minutes_valid: 180,
+    scan_base_url:
+      localStorage.getItem('teacherQrScanBaseUrl') ||
+      'http://192.168.1.10/EduSchedule-Pro/backend/api/teacher_qr.php',
+  })
 
-  const classes = useMemo(() => {
-    const unique = [
-      ...new Set([
-        ...DEFAULT_CLASSES,
-        ...store.seances.map((item) => item.classe).filter(Boolean),
-      ]),
-    ]
+  const [qrResult, setQrResult] = useState(null)
+  const [qrImage, setQrImage] = useState('')
 
-    return ['Toutes', ...unique]
-  }, [store.seances])
-
-  const seances = useMemo(() => {
-    return store.seances
-      .filter((item) => item.weekKey === selectedWeek)
-      .filter((item) =>
-        selectedClasse === 'Toutes' ? true : item.classe === selectedClasse,
-      )
-      .filter((item) =>
-        selectedDay === 'Tous' ? true : item.jour === selectedDay,
-      )
-      .filter((item) =>
-        role === 'enseignant' && teacherName
-          ? item.enseignant === teacherName
-          : true,
-      )
-      .filter((item) =>
-        role === 'delegue' && delegateClass ? item.classe === delegateClass : true,
-      )
-      .sort((a, b) => {
-        const dayA = week.days.findIndex((day) => day.key === a.jour)
-        const dayB = week.days.findIndex((day) => day.key === b.jour)
-
-        if (dayA !== dayB) return dayA - dayB
-
-        return a.horaire.localeCompare(b.horaire)
-      })
-  }, [
-    store.seances,
-    selectedWeek,
-    selectedClasse,
-    selectedDay,
-    week.days,
-    role,
-    teacherName,
-    delegateClass,
-  ])
-
-  const selectedSeance = useMemo(() => {
-    if (!selectedSeanceId) return seances[0] || null
-
-    return (
-      store.seances.find((item) => item.id === selectedSeanceId) ||
-      seances[0] ||
-      null
-    )
-  }, [selectedSeanceId, store.seances, seances])
-
-  const pointage = selectedSeance
-    ? store.pointages.find((item) => item.seanceId === selectedSeance.id)
-    : null
-
-  const stats = useMemo(() => {
-    const total = seances.length
-
-    const pointes = seances.filter((seance) =>
-      store.pointages.some((item) => item.seanceId === seance.id),
-    ).length
-
-    const presents = seances.filter((seance) =>
-      store.pointages.some(
-        (item) => item.seanceId === seance.id && item.statut === 'present',
-      ),
-    ).length
-
-    const retards = seances.filter((seance) =>
-      store.pointages.some(
-        (item) => item.seanceId === seance.id && item.statut === 'retard',
-      ),
-    ).length
-
-    const absents = seances.filter((seance) =>
-      store.pointages.some(
-        (item) => item.seanceId === seance.id && item.statut === 'absent',
-      ),
-    ).length
-
-    return {
-      total,
-      pointes,
-      presents,
-      retards,
-      absents,
-      restants: Math.max(0, total - pointes),
-    }
-  }, [seances, store.pointages])
-
-  const handleGenerateQR = (seance) => {
-    if (!permissions.canGenerateQR) {
-      setMessage('Vous n’avez pas le droit de générer un QR-Code.')
-      return
+  const visiblePresences = useMemo(() => {
+    if (role !== 'enseignant' || !teacherName) {
+      return presences
     }
 
-    setGeneratedQr((current) => ({
+    return presences.filter((item) => item.enseignant === teacherName)
+  }, [presences, role, teacherName])
+
+  const selectedCreneau = useMemo(() => {
+    return creneaux.find((item) => String(item.id) === String(form.creneau_id))
+  }, [creneaux, form.creneau_id])
+
+  const loadData = async () => {
+    try {
+      setLoading(true)
+      setError('')
+
+      const res = await fetch(`${API_URL}?action=list`)
+      const text = await res.text()
+      const json = JSON.parse(text)
+
+      if (!json.success) {
+        throw new Error(json.message || 'Erreur de chargement.')
+      }
+
+      const data = json.data || {}
+
+      setCreneaux(data.creneaux || [])
+      setPresences(data.presences || [])
+      setTokens(data.tokens || [])
+
+      if (!form.creneau_id && data.creneaux?.[0]?.id) {
+        setForm((current) => ({
+          ...current,
+          creneau_id: String(data.creneaux[0].id),
+        }))
+      }
+    } catch (err) {
+      setError(err.message || 'Impossible de charger le pointage QR.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadData()
+  }, [])
+
+  const updateForm = (field, value) => {
+    setForm((current) => ({
       ...current,
-      [seance.id]: true,
+      [field]: value,
     }))
 
-    setSelectedSeanceId(seance.id)
-    setMessage(`QR-Code généré pour ${seance.matiere} (${seance.classe}).`)
-  }
-
-  const handleTeacherScan = () => {
-    if (!selectedSeance) {
-      setMessage('Aucune séance sélectionnée.')
-      return
-    }
-
-    if (!permissions.canTeacherScan) {
-      setMessage('Seul l’enseignant peut scanner pour valider sa présence.')
-      return
-    }
-
-    const autoStatus = detectTeacherScanStatus(selectedSeance)
-
-    const result = actions.markPointage(
-      selectedSeance.id,
-      autoStatus,
-      teacherName || getRoleLabel(role),
-    )
-
-    if (!result.success) {
-      setMessage(result.message || 'Erreur lors du pointage.')
-      return
-    }
-
-    if (autoStatus === 'retard') {
-      setMessage(
-        'Présence enregistrée, mais marquée en retard automatiquement selon l’horaire.',
-      )
-    } else {
-      setMessage('Présence enseignant validée avec succès.')
+    if (field === 'scan_base_url') {
+      localStorage.setItem('teacherQrScanBaseUrl', value)
     }
   }
 
-  const handleManualPointage = (status) => {
-    if (!selectedSeance) {
-      setMessage('Aucune séance sélectionnée.')
+  const generateQr = async () => {
+    if (!canGenerate) {
+      setMessage('Seul l’administrateur ou le surveillant peut générer un QR code.')
       return
     }
 
-    if (!permissions.canManualControl) {
-      setMessage('Seul l’administrateur ou le surveillant peut corriger ce statut.')
+    if (!form.creneau_id || !form.date_cours || !form.scan_base_url) {
+      setMessage('Choisis un cours, une date et une URL mobile.')
       return
     }
 
-    const result = actions.markPointage(
-      selectedSeance.id,
-      status,
-      getRoleLabel(role),
-    )
+    try {
+      setMessage('')
+      setError('')
+      setQrResult(null)
+      setQrImage('')
 
-    if (!result.success) {
-      setMessage(result.message || 'Erreur lors du pointage.')
-      return
-    }
+      const res = await fetch(`${API_URL}?action=generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...form,
+          created_by: user?.email || user?.role || 'admin',
+        }),
+      })
 
-    if (status === 'present') {
-      setMessage('Présence confirmée.')
-    }
+      const text = await res.text()
+      const json = JSON.parse(text)
 
-    if (status === 'retard') {
-      setMessage('Retard confirmé.')
-    }
+      if (!json.success) {
+        setMessage(json.message || 'Impossible de générer le QR code.')
+        return
+      }
 
-    if (status === 'absent') {
-      setMessage('Absence confirmée.')
+      const scanUrl = json.data.scan_url
+
+      const image = await QRCode.toDataURL(scanUrl, {
+        width: 320,
+        margin: 2,
+      })
+
+      setQrResult(json.data)
+      setQrImage(image)
+      setMessage('QR code généré. Le professeur peut le scanner avec son téléphone.')
+
+      await loadData()
+    } catch (err) {
+      setMessage(err.message || 'Erreur lors de la génération du QR code.')
     }
   }
 
-  const handleDelegateReport = (type) => {
-    if (!selectedSeance) {
-      setMessage('Aucune séance sélectionnée.')
-      return
-    }
+  const copyLink = async () => {
+    if (!qrResult?.scan_url) return
 
-    if (!permissions.canReport) {
-      setMessage('Seul le délégué peut signaler une anomalie de cours.')
-      return
-    }
-
-    const title =
-      type === 'absence'
-        ? 'Absence professeur signalée'
-        : 'Retard professeur signalé'
-
-    actions.addActivity({
-      type: 'alerte',
-      title,
-      text: `${selectedSeance.matiere} - ${selectedSeance.classe}`,
-    })
-
-    setMessage(
-      type === 'absence'
-        ? 'Signalement envoyé : professeur absent.'
-        : 'Signalement envoyé : professeur en retard.',
-    )
-  }
-
-  if (permissions.restricted) {
-    return (
-      <div className="page">
-        <div className="placeholder">
-          <div>
-            <div className="placeholder-icon">QR</div>
-            <h1>Accès non autorisé</h1>
-            <p>
-              Le module Pointage QR-Code n’est pas disponible pour le rôle
-              comptable.
-            </p>
-          </div>
-        </div>
-      </div>
-    )
+    await navigator.clipboard.writeText(qrResult.scan_url)
+    setMessage('Lien copié.')
   }
 
   return (
     <div className="page qr-page">
       <div className="page-heading">
         <div>
-          <h1>Pointage QR-Code</h1>
+          <h1>Pointage QR professeur</h1>
           <p>
-            Génération, scan et contrôle des présences à partir des séances
-            planifiées.
+            Génère un QR code de cours. Le professeur le scanne avec son téléphone
+            pour marquer sa présence ou son retard.
           </p>
         </div>
 
-        {selectedSeance && permissions.canGenerateQR && (
-          <button
-            className="primary-btn"
-            onClick={() => handleGenerateQR(selectedSeance)}
-          >
-            Générer QR-Code
-          </button>
-        )}
+        <button className="primary-btn" onClick={loadData}>
+          Actualiser
+        </button>
       </div>
 
-      <div className="qr-role-note">
-        <strong>{getRoleLabel(role)}</strong>
-        <span>{getRoleDescription(role)}</span>
+      <div className="qr-warning">
+        <strong>Important téléphone</strong>
+        <span>
+          Pour scanner avec un téléphone, l’URL mobile ne doit pas être
+          <b> localhost</b>. Utilise l’adresse IP du PC sur le Wi-Fi, par exemple
+          <b> http://192.168.1.10/EduSchedule-Pro/backend/api/teacher_qr.php</b>.
+        </span>
       </div>
 
-      <div className="stats-grid">
-        <StatBox label="Séances" value={stats.total} code="SE" />
-        <StatBox label="Pointées" value={stats.pointes} code="OK" />
-        <StatBox label="Retards" value={stats.retards} code="RT" />
-        <StatBox label="Absences" value={stats.absents} code="AB" />
-      </div>
-
-      <div className="qr-toolbar">
-        <div className="isge-filter">
-          <label>Semaine</label>
-          <select
-            value={selectedWeek}
-            onChange={(e) => {
-              setSelectedWeek(e.target.value)
-              setSelectedSeanceId(null)
-              setMessage('')
-            }}
-          >
-            {WEEK_OPTIONS.map((item) => (
-              <option key={item.key} value={item.key}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="isge-filter">
-          <label>Classe</label>
-          <select
-            value={selectedClasse}
-            disabled={role === 'delegue'}
-            onChange={(e) => {
-              setSelectedClasse(e.target.value)
-              setSelectedSeanceId(null)
-              setMessage('')
-            }}
-          >
-            {classes.map((classe) => (
-              <option key={classe} value={classe}>
-                {classe}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="isge-filter">
-          <label>Jour</label>
-          <select
-            value={selectedDay}
-            onChange={(e) => {
-              setSelectedDay(e.target.value)
-              setSelectedSeanceId(null)
-              setMessage('')
-            }}
-          >
-            <option value="Tous">Tous les jours</option>
-            {week.days.map((day) => (
-              <option key={day.key} value={day.key}>
-                {day.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
+      {loading && <div className="qr-message">Chargement...</div>}
+      {error && <div className="qr-message error">{error}</div>}
       {message && <div className="qr-message">{message}</div>}
 
       <div className="qr-grid">
-        <section className="panel large">
+        <section className="panel qr-generator">
           <div className="panel-header">
-            <h3>Séances à pointer</h3>
-            <button>{stats.restants} restante(s)</button>
+            <h3>Générer un QR de cours</h3>
+            <button>{canGenerate ? 'Autorisé' : 'Consultation'}</button>
           </div>
 
-          <div className="qr-session-list">
-            {seances.length === 0 && (
-              <div className="qr-empty-state">
-                Aucune séance disponible pour ce filtre.
-              </div>
-            )}
+          {!canGenerate && (
+            <div className="qr-readonly">
+              Ton rôle ne permet pas de générer un QR code. Le professeur scanne
+              normalement le QR affiché par le surveillant ou l’administration.
+            </div>
+          )}
 
-            {seances.map((seance) => {
-              const itemPointage = store.pointages.find(
-                (item) => item.seanceId === seance.id,
-              )
+          <div className="qr-form">
+            <div className="qr-field">
+              <label>Cours</label>
+              <select
+                value={form.creneau_id}
+                disabled={!canGenerate}
+                onChange={(e) => updateForm('creneau_id', e.target.value)}
+              >
+                <option value="">Choisir un cours</option>
+                {creneaux.map((creneau) => (
+                  <option key={creneau.id} value={creneau.id}>
+                    {creneau.jour} — {creneau.horaire} — {creneau.classe} —{' '}
+                    {creneau.matiere} — {creneau.enseignant}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-              return (
-                <button
-                  key={seance.id}
-                  className={
-                    selectedSeance?.id === seance.id
-                      ? 'qr-session-card active'
-                      : 'qr-session-card'
-                  }
-                  onClick={() => {
-                    setSelectedSeanceId(seance.id)
-                    setMessage('')
-                  }}
-                >
-                  <div>
-                    <strong>{seance.matiere}</strong>
-                    <span>
-                      {seance.classe} • {seance.jour} •{' '}
-                      {formatSlot(seance.horaire)}
-                    </span>
-                    <small>
-                      {seance.enseignant} — {seance.salle}
-                    </small>
-                  </div>
+            <div className="qr-field">
+              <label>Date du cours</label>
+              <input
+                type="date"
+                value={form.date_cours}
+                disabled={!canGenerate}
+                onChange={(e) => updateForm('date_cours', e.target.value)}
+              />
+            </div>
 
-                  <StatusBadge status={itemPointage?.statut || 'non_pointe'} />
-                </button>
-              )
-            })}
+            <div className="qr-field">
+              <label>Durée de validité</label>
+              <select
+                value={form.minutes_valid}
+                disabled={!canGenerate}
+                onChange={(e) => updateForm('minutes_valid', Number(e.target.value))}
+              >
+                <option value={30}>30 minutes</option>
+                <option value={60}>1 heure</option>
+                <option value={120}>2 heures</option>
+                <option value={180}>3 heures</option>
+                <option value={360}>6 heures</option>
+                <option value={1440}>24 heures</option>
+              </select>
+            </div>
+
+            <div className="qr-field wide">
+              <label>URL mobile de scan</label>
+              <input
+                value={form.scan_base_url}
+                disabled={!canGenerate}
+                onChange={(e) => updateForm('scan_base_url', e.target.value)}
+                placeholder="http://IP-DU-PC/EduSchedule-Pro/backend/api/teacher_qr.php"
+              />
+            </div>
           </div>
+
+          {selectedCreneau && (
+            <div className="qr-course-preview">
+              <strong>{selectedCreneau.matiere}</strong>
+              <span>
+                {selectedCreneau.classe} • {selectedCreneau.enseignant}
+              </span>
+              <small>
+                {selectedCreneau.jour} • {selectedCreneau.horaire} •{' '}
+                {selectedCreneau.salle}
+              </small>
+            </div>
+          )}
+
+          {canGenerate && (
+            <div className="qr-actions">
+              <button className="primary-btn" onClick={generateQr}>
+                Générer le QR code
+              </button>
+            </div>
+          )}
         </section>
 
-        <section className="panel qr-panel">
+        <section className="panel qr-result-panel">
           <div className="panel-header">
-            <h3>
-              {role === 'delegue'
-                ? 'Signalement du cours'
-                : role === 'enseignant'
-                  ? 'Scan enseignant'
-                  : 'Contrôle du pointage'}
-            </h3>
-            <button>{getRoleLabel(role)}</button>
+            <h3>QR code à scanner</h3>
+            <button>{qrResult ? 'Prêt' : 'En attente'}</button>
           </div>
 
-          {!selectedSeance ? (
-            <div className="qr-empty-state">
-              Sélectionnez une séance pour continuer.
+          {!qrResult ? (
+            <div className="qr-empty">
+              Génère un QR code pour qu’il apparaisse ici.
             </div>
           ) : (
-            <>
-              <div className="qr-selected-info">
-                <strong>{selectedSeance.matiere}</strong>
-                <span>{selectedSeance.classe}</span>
+            <div className="qr-result">
+              <div className="qr-image-box">
+                {qrImage && <img src={qrImage} alt="QR code professeur" />}
+              </div>
+
+              <div className="qr-result-info">
+                <strong>{qrResult.creneau?.matiere}</strong>
+                <span>{qrResult.creneau?.enseignant}</span>
                 <small>
-                  {selectedSeance.jour} • {formatSlot(selectedSeance.horaire)} •{' '}
-                  {selectedSeance.salle}
+                  Expire le {formatDateTime(qrResult.expires_at)}
                 </small>
               </div>
 
-              {role !== 'delegue' && (
-                <>
-                  <FakeQRCode
-                    seance={selectedSeance}
-                    active={generatedQr[selectedSeance.id]}
-                  />
+              <button className="qr-copy-btn" onClick={copyLink}>
+                Copier le lien
+              </button>
 
-                  <div className="qr-token-box">
-                    QR-{selectedSeance.id}-{selectedSeance.weekKey}
-                  </div>
-                </>
-              )}
-
-              {role === 'delegue' && (
-                <div className="qr-current-status">
-                  <strong>Rôle du délégué</strong>
-                  <span>
-                    Le délégué ne valide pas officiellement une absence. Il
-                    signale seulement un retard ou une absence de professeur au
-                    surveillant.
-                  </span>
-                </div>
-              )}
-
-              {pointage && (
-                <div className="qr-current-status">
-                  <strong>Dernier pointage</strong>
-                  <span>
-                    {formatStatus(pointage.statut)} à {pointage.heureScan} par{' '}
-                    {pointage.validePar}
-                  </span>
-                </div>
-              )}
-
-              <div className="qr-actions">
-                {permissions.canGenerateQR && (
-                  <button
-                    className="isge-secondary-btn"
-                    onClick={() => handleGenerateQR(selectedSeance)}
-                  >
-                    Générer / régénérer QR
-                  </button>
-                )}
-
-                {permissions.canTeacherScan && (
-                  <button className="primary-btn" onClick={handleTeacherScan}>
-                    Scanner / valider ma présence
-                  </button>
-                )}
-
-                {permissions.canManualControl && (
-                  <>
-                    <button
-                      className="primary-btn"
-                      onClick={() => handleManualPointage('present')}
-                    >
-                      Confirmer présent
-                    </button>
-
-                    <button
-                      className="qr-warning-btn"
-                      onClick={() => handleManualPointage('retard')}
-                    >
-                      Confirmer retard
-                    </button>
-
-                    <button
-                      className="qr-danger-btn"
-                      onClick={() => handleManualPointage('absent')}
-                    >
-                      Confirmer absence
-                    </button>
-                  </>
-                )}
-
-                {permissions.canReport && (
-                  <>
-                    <button
-                      className="qr-report-btn"
-                      onClick={() => handleDelegateReport('retard')}
-                    >
-                      Signaler retard professeur
-                    </button>
-
-                    <button
-                      className="qr-danger-btn"
-                      onClick={() => handleDelegateReport('absence')}
-                    >
-                      Signaler absence professeur
-                    </button>
-                  </>
-                )}
-              </div>
-            </>
+              <a
+                className="qr-open-link"
+                href={qrResult.scan_url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Tester le scan sur ce PC
+              </a>
+            </div>
           )}
         </section>
       </div>
+
+      <section className="panel qr-presence-panel">
+        <div className="panel-header">
+          <h3>Présences professeurs</h3>
+          <button>{visiblePresences.length} pointage(s)</button>
+        </div>
+
+        <div className="qr-table-wrap">
+          <table className="qr-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Professeur</th>
+                <th>Classe</th>
+                <th>Matière</th>
+                <th>Horaire</th>
+                <th>Salle</th>
+                <th>Statut</th>
+                <th>Scanné à</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {visiblePresences.map((presence) => (
+                <tr key={presence.id}>
+                  <td>{formatDate(presence.date_cours)}</td>
+                  <td>{presence.enseignant}</td>
+                  <td>{presence.classe}</td>
+                  <td>{presence.matiere}</td>
+                  <td>{presence.horaire}</td>
+                  <td>{presence.salle}</td>
+                  <td>
+                    <span className={`qr-status ${presence.statut}`}>
+                      {formatStatus(presence.statut)}
+                    </span>
+                  </td>
+                  <td>{formatDateTime(presence.scanned_at)}</td>
+                </tr>
+              ))}
+
+              {visiblePresences.length === 0 && (
+                <tr>
+                  <td colSpan="8" className="qr-empty-cell">
+                    Aucun pointage professeur pour le moment.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   )
 }
 
-function StatBox({ label, value, code }) {
-  return (
-    <div className="stat-card">
-      <div>
-        <p>{label}</p>
-        <h2>{value}</h2>
-        <span>Pointage QR-Code</span>
-      </div>
-
-      <div className="stat-icon">{code}</div>
-    </div>
-  )
-}
-
-function StatusBadge({ status }) {
-  return <div className={`qr-status ${status}`}>{formatStatus(status)}</div>
-}
-
-function FakeQRCode({ seance, active }) {
-  const seed = getSeed(seance.id + seance.matiere + seance.classe)
-
-  return (
-    <div className={active ? 'qr-code-box active' : 'qr-code-box'}>
-      {Array.from({ length: 81 }).map((_, index) => {
-        const pixelActive =
-          index < 9 ||
-          index % 10 === 0 ||
-          ((index + seed) * 7) % 5 !== 0
-
-        return (
-          <span
-            key={index}
-            className={pixelActive ? 'qr-pixel active' : 'qr-pixel'}
-          />
-        )
-      })}
-    </div>
-  )
-}
-
-function getPermissions(role) {
-  if (role === 'comptable') {
-    return {
-      restricted: true,
-      canGenerateQR: false,
-      canTeacherScan: false,
-      canManualControl: false,
-      canReport: false,
-    }
-  }
-
-  if (role === 'admin') {
-    return {
-      restricted: false,
-      canGenerateQR: true,
-      canTeacherScan: false,
-      canManualControl: true,
-      canReport: false,
-    }
-  }
-
-  if (role === 'surveillant') {
-    return {
-      restricted: false,
-      canGenerateQR: true,
-      canTeacherScan: false,
-      canManualControl: true,
-      canReport: false,
-    }
-  }
-
-  if (role === 'enseignant') {
-    return {
-      restricted: false,
-      canGenerateQR: false,
-      canTeacherScan: true,
-      canManualControl: false,
-      canReport: false,
-    }
-  }
-
-  if (role === 'delegue') {
-    return {
-      restricted: false,
-      canGenerateQR: false,
-      canTeacherScan: false,
-      canManualControl: false,
-      canReport: true,
-    }
-  }
-
-  return {
-    restricted: false,
-    canGenerateQR: false,
-    canTeacherScan: false,
-    canManualControl: false,
-    canReport: false,
-  }
-}
-
-function detectTeacherScanStatus(seance) {
-  const parsed = parseSlot(seance.horaire)
-
-  if (!parsed) return 'present'
-
-  const now = new Date()
-  const currentMinutes = now.getHours() * 60 + now.getMinutes()
-  const lateLimit = parsed.start + 15
-
-  if (currentMinutes > lateLimit) {
-    return 'retard'
-  }
-
-  return 'present'
-}
-
-function getSeed(value = '') {
-  return value.split('').reduce((total, char) => total + char.charCodeAt(0), 0)
-}
-
-function getWeek(weekKey) {
-  return WEEK_OPTIONS.find((item) => item.key === weekKey) || WEEK_OPTIONS[0]
-}
-
-function getRoleLabel(role) {
-  const labels = {
-    admin: 'Administrateur',
-    enseignant: 'Enseignant',
-    delegue: 'Délégué',
-    surveillant: 'Surveillant',
-    comptable: 'Comptable',
-  }
-
-  return labels[role] || 'Utilisateur'
-}
-
-function getRoleDescription(role) {
-  const descriptions = {
-    admin:
-      'Vous générez les QR-Codes et corrigez officiellement les pointages.',
-    surveillant:
-      'Vous contrôlez les séances et confirmez les retards ou absences.',
-    enseignant:
-      'Vous voyez uniquement vos cours et vous scannez le QR-Code pour valider votre présence.',
-    delegue:
-      'Vous voyez uniquement votre classe et vous signalez une anomalie de cours.',
-    comptable:
-      'Le comptable n’intervient pas dans le pointage QR-Code.',
-  }
-
-  return descriptions[role] || 'Accès limité au module de pointage.'
+function todayIso() {
+  return new Date().toISOString().slice(0, 10)
 }
 
 function formatStatus(status) {
@@ -682,10 +372,21 @@ function formatStatus(status) {
     present: 'Présent',
     retard: 'Retard',
     absent: 'Absent',
-    non_pointe: 'Non pointé',
   }
 
   return labels[status] || status
+}
+
+function formatDate(value) {
+  if (!value) return '—'
+
+  return new Date(`${value}T00:00:00`).toLocaleDateString('fr-FR')
+}
+
+function formatDateTime(value) {
+  if (!value) return '—'
+
+  return new Date(String(value).replace(' ', 'T')).toLocaleString('fr-FR')
 }
 
 export default PointageQRCode
