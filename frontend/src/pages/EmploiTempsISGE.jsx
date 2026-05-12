@@ -7,9 +7,7 @@ import {
 } from '../services/appStore'
 import { getClassNameFromUser, getTeacherNameFromUser } from '../services/userScope'
 import { exportHtmlToPdf } from '../services/pdfExport'
-import {
-  getHolidayForWeekDay,
-} from '../services/burkinaHolidays'
+import { getHolidayForWeekDay } from '../services/burkinaHolidays'
 
 const API_BASE = 'http://127.0.0.1/EduSchedule-Pro/backend/api'
 
@@ -161,9 +159,7 @@ function EmploiTempsISGE({ user }) {
           ? seance.enseignant === form.enseignant
           : true
 
-        const sameClass = form.classe
-          ? seance.classe === form.classe
-          : true
+        const sameClass = form.classe ? seance.classe === form.classe : true
 
         return sameTeacher && sameClass
       })
@@ -719,7 +715,7 @@ function EmploiTempsISGE({ user }) {
                   <option value="">Choisir un horaire</option>
                   {horaires.map((horaire) => (
                     <option key={horaire} value={horaire}>
-                      {formatSlot(horaire)}
+                      {formatSlotSafe(horaire)}
                     </option>
                   ))}
                 </select>
@@ -847,10 +843,7 @@ function ClassScheduleTable({
                 const holiday = getHolidayForWeekDay(week, selectedWeek, dayIndex)
 
                 return (
-                  <th
-                    key={day.key}
-                    className={holiday ? 'holiday-head' : ''}
-                  >
+                  <th key={day.key} className={holiday ? 'holiday-head' : ''}>
                     {day.label}
                     {holiday && <span>{holiday.name}</span>}
                     {holiday?.tentative && <small>Date indicative</small>}
@@ -863,9 +856,7 @@ function ClassScheduleTable({
           <tbody>
             {timeRows.map((timeRow, rowIndex) => (
               <tr key={`${classe}-${timeRow.id}`}>
-                <td className="horaire-cell main-time-cell">
-                  {timeRow.label}
-                </td>
+                <td className="horaire-cell main-time-cell">{timeRow.label}</td>
 
                 {week.days.map((day, dayIndex) => {
                   const holiday = getHolidayForWeekDay(week, selectedWeek, dayIndex)
@@ -1160,7 +1151,9 @@ function buildClassSchedulePdf(
                                         <span>${escapeHtml(seance.salle)}</span>
                                         ${
                                           seance.groupe
-                                            ? `<span>Groupe : ${escapeHtml(seance.groupe)}</span>`
+                                            ? `<span>Groupe : ${escapeHtml(
+                                                seance.groupe,
+                                              )}</span>`
                                             : ''
                                         }
                                         <small>${escapeHtml(
@@ -1200,13 +1193,30 @@ function sortHoraires(values) {
 
 function getHoraireStart(value) {
   const parsed = parseHoraire(value)
-  return parsed ? parsed.start : 9999
+  return parsed ? parsed.start : 99999
 }
 
 function getMainTimeRowForHoraire(horaire) {
   const parsed = parseHoraire(horaire)
 
   if (!parsed) return MAIN_TIME_ROWS[0]
+
+  const overlaps = MAIN_TIME_ROWS
+    .map((row) => {
+      const overlapStart = Math.max(parsed.start, row.start)
+      const overlapEnd = Math.min(parsed.end, row.end)
+      const overlap = Math.max(0, overlapEnd - overlapStart)
+
+      return {
+        row,
+        overlap,
+      }
+    })
+    .sort((a, b) => b.overlap - a.overlap)
+
+  if (overlaps[0] && overlaps[0].overlap > 0) {
+    return overlaps[0].row
+  }
 
   if (parsed.start < 10 * 60) {
     return MAIN_TIME_ROWS[0]
@@ -1220,18 +1230,11 @@ function getMainTimeRowForHoraire(horaire) {
 }
 
 function normalizeHoraireInput(value) {
-  const text = String(value || '')
-    .trim()
-    .replaceAll('[', '')
-    .replaceAll(']', '')
-    .replaceAll('H', 'h')
-    .replaceAll(' ', '')
-    .replaceAll('à', '-')
-    .replaceAll(':', '-')
+  const parsed = parseHoraire(value)
 
-  const parsed = parseHoraire(text)
-
-  if (!parsed) return text
+  if (!parsed) {
+    return String(value || '').trim()
+  }
 
   return `${formatMinuteCompact(parsed.start)}-${formatMinuteCompact(parsed.end)}`
 }
@@ -1241,23 +1244,37 @@ function isValidHoraire(value) {
 }
 
 function parseHoraire(value) {
-  const text = String(value || '')
-    .trim()
+  const original = String(value || '').trim()
+
+  if (!original) return null
+
+  const text = original
     .replaceAll('[', '')
     .replaceAll(']', '')
     .replaceAll('H', 'h')
     .replaceAll(' ', '')
+    .replaceAll('à', '-')
+    .replaceAll('–', '-')
+    .replaceAll('—', '-')
+    .replaceAll(':', '-')
 
-  const match = text.match(
-    /(\d{1,2})h?(\d{2})?\s*[-:à]\s*(\d{1,2})h?(\d{2})?/i,
-  )
+  const match = text.match(/^(\d{1,2})h?(\d{2})?-(\d{1,2})h?(\d{2})?$/i)
 
   if (!match) return null
 
-  const startHour = Number(match[1] || 0)
+  const startHour = Number(match[1])
   const startMin = Number(match[2] || 0)
-  const endHour = Number(match[3] || 0)
+  const endHour = Number(match[3])
   const endMin = Number(match[4] || 0)
+
+  if (
+    Number.isNaN(startHour) ||
+    Number.isNaN(startMin) ||
+    Number.isNaN(endHour) ||
+    Number.isNaN(endMin)
+  ) {
+    return null
+  }
 
   if (startHour > 23 || endHour > 23 || startMin > 59 || endMin > 59) {
     return null
@@ -1266,9 +1283,7 @@ function parseHoraire(value) {
   const start = startHour * 60 + startMin
   const end = endHour * 60 + endMin
 
-  if (end <= start) {
-    return null
-  }
+  if (end <= start) return null
 
   return {
     start,
@@ -1306,6 +1321,18 @@ function formatMinuteForBracket(totalMinutes) {
   const minutes = totalMinutes % 60
 
   return `${String(hours).padStart(2, '0')}H${String(minutes).padStart(2, '0')}`
+}
+
+function formatSlotSafe(value) {
+  try {
+    if (typeof formatSlot === 'function') {
+      return formatSlot(value)
+    }
+
+    return value
+  } catch {
+    return value
+  }
 }
 
 function escapeHtml(value) {
