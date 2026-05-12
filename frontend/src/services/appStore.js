@@ -1,50 +1,19 @@
 import { useEffect, useState } from 'react'
 
 const STORE_KEY = 'eduschedule_frontend_store_v1'
+const STORE_VERSION = 2
 
-export const WEEK_OPTIONS = [
-  {
-    key: '2026-04-27',
-    label: '27 Avril au 02 Mai 2026',
-    title: 'EMPLOI DU TEMPS DU 27 AVRIL AU 02 MAI 2026',
-    days: [
-      { key: 'Lundi', label: 'Lundi 27' },
-      { key: 'Mardi', label: 'Mardi 28' },
-      { key: 'Mercredi', label: 'Mercredi 29' },
-      { key: 'Jeudi', label: 'Jeudi 30' },
-      { key: 'Vendredi', label: 'Vendredi 01' },
-      { key: 'Samedi', label: 'Samedi 02' },
-    ],
-  },
-  {
-    key: '2026-05-04',
-    label: '04 Mai au 09 Mai 2026',
-    title: 'EMPLOI DU TEMPS DU 04 MAI AU 09 MAI 2026',
-    days: [
-      { key: 'Lundi', label: 'Lundi 04' },
-      { key: 'Mardi', label: 'Mardi 05' },
-      { key: 'Mercredi', label: 'Mercredi 06' },
-      { key: 'Jeudi', label: 'Jeudi 07' },
-      { key: 'Vendredi', label: 'Vendredi 08' },
-      { key: 'Samedi', label: 'Samedi 09' },
-    ],
-  },
-  {
-    key: '2026-05-11',
-    label: '11 Mai au 16 Mai 2026',
-    title: 'EMPLOI DU TEMPS DU 11 MAI AU 16 MAI 2026',
-    days: [
-      { key: 'Lundi', label: 'Lundi 11' },
-      { key: 'Mardi', label: 'Mardi 12' },
-      { key: 'Mercredi', label: 'Mercredi 13' },
-      { key: 'Jeudi', label: 'Jeudi 14' },
-      { key: 'Vendredi', label: 'Vendredi 15' },
-      { key: 'Samedi', label: 'Samedi 16' },
-    ],
-  },
-]
+const WEEK_DAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi']
 
-export const DEFAULT_WEEK_KEY = '2026-04-27'
+export const DEFAULT_WEEK_KEY = getMondayIsoDate(new Date())
+
+export const WEEK_OPTIONS = generateWeekOptions({
+  weeksBefore: 8,
+  weeksAfter: 24,
+})
+
+const DEMO_WEEK_KEY = DEFAULT_WEEK_KEY
+const DEMO_NEXT_WEEK_KEY = getWeekKeyByOffset(1)
 
 export const DEFAULT_SLOTS = [
   '07h30-09h30',
@@ -97,7 +66,7 @@ export const DEFAULT_ROOMS = [
 const INITIAL_SEANCES = [
   {
     id: 's1',
-    weekKey: '2026-04-27',
+    weekKey: DEMO_WEEK_KEY,
     classe: 'Licence 1 RIT',
     matiere: 'Programmation Web',
     enseignant: 'TRAORE Jean',
@@ -111,7 +80,7 @@ const INITIAL_SEANCES = [
   },
   {
     id: 's2',
-    weekKey: '2026-04-27',
+    weekKey: DEMO_WEEK_KEY,
     classe: 'Licence 1 RIT',
     matiere: 'Base de Données',
     enseignant: 'KABORE Paul',
@@ -125,7 +94,7 @@ const INITIAL_SEANCES = [
   },
   {
     id: 's3',
-    weekKey: '2026-04-27',
+    weekKey: DEMO_WEEK_KEY,
     classe: 'Licence 1 RIT',
     matiere: 'Réseaux',
     enseignant: 'OUEDRAOGO Issa',
@@ -139,7 +108,7 @@ const INITIAL_SEANCES = [
   },
   {
     id: 's4',
-    weekKey: '2026-04-27',
+    weekKey: DEMO_WEEK_KEY,
     classe: 'Licence 2 RIT',
     matiere: 'Sécurité',
     enseignant: 'SANKARA Mariam',
@@ -153,7 +122,7 @@ const INITIAL_SEANCES = [
   },
   {
     id: 's5',
-    weekKey: '2026-04-27',
+    weekKey: DEMO_WEEK_KEY,
     classe: 'Licence 2 RIT',
     matiere: 'Cloud Computing',
     enseignant: 'COMPAORE Adama',
@@ -167,7 +136,7 @@ const INITIAL_SEANCES = [
   },
   {
     id: 's6',
-    weekKey: '2026-04-27',
+    weekKey: DEMO_WEEK_KEY,
     classe: 'Licence 3 RIT',
     matiere: 'Programmation Web Avancée',
     enseignant: 'SAWADOGO Ibrahim',
@@ -181,7 +150,7 @@ const INITIAL_SEANCES = [
   },
   {
     id: 's7',
-    weekKey: '2026-04-27',
+    weekKey: DEMO_WEEK_KEY,
     classe: 'Licence 3 RIT',
     matiere: 'Administration Linux',
     enseignant: 'NIKIEMA Salif',
@@ -195,10 +164,10 @@ const INITIAL_SEANCES = [
   },
   {
     id: 's8',
-    weekKey: '2026-04-27',
+    weekKey: DEMO_WEEK_KEY,
     classe: 'Licence 3 RIT',
     matiere: 'Cybersécurité',
-    enseignant: 'SANKARA Mariam',
+    enseignant: 'ZONGO Aminata',
     salle: 'B202',
     jour: 'Jeudi',
     horaire: '15h00-18h00',
@@ -209,7 +178,7 @@ const INITIAL_SEANCES = [
   },
   {
     id: 's9',
-    weekKey: '2026-04-27',
+    weekKey: DEMO_WEEK_KEY,
     classe: 'Master 1 RSI',
     matiere: 'Base de Données Avancées',
     enseignant: 'NIKIEMA Salif',
@@ -223,7 +192,7 @@ const INITIAL_SEANCES = [
   },
   {
     id: 's10',
-    weekKey: '2026-04-27',
+    weekKey: DEMO_WEEK_KEY,
     classe: 'Master 1 RSI',
     matiere: 'Sécurité des Réseaux',
     enseignant: 'OUEDRAOGO Issa',
@@ -237,7 +206,7 @@ const INITIAL_SEANCES = [
   },
   {
     id: 's11',
-    weekKey: '2026-04-27',
+    weekKey: DEMO_WEEK_KEY,
     classe: 'Master 2 RSI',
     matiere: 'Réseaux Haut Débit',
     enseignant: 'ZONGO Aminata',
@@ -251,7 +220,7 @@ const INITIAL_SEANCES = [
   },
   {
     id: 's12',
-    weekKey: '2026-04-27',
+    weekKey: DEMO_WEEK_KEY,
     classe: 'Master 2 RSI',
     matiere: 'Audit et Gouvernance SI',
     enseignant: 'TRAORE Jean',
@@ -263,10 +232,9 @@ const INITIAL_SEANCES = [
     statut: 'planifiee',
     createdBy: 'system',
   },
-
   {
     id: 's13',
-    weekKey: '2026-05-04',
+    weekKey: DEMO_NEXT_WEEK_KEY,
     classe: 'Licence 1 RIT',
     matiere: 'Programmation Web',
     enseignant: 'TRAORE Jean',
@@ -280,7 +248,7 @@ const INITIAL_SEANCES = [
   },
   {
     id: 's14',
-    weekKey: '2026-05-04',
+    weekKey: DEMO_NEXT_WEEK_KEY,
     classe: 'Licence 2 RIT',
     matiere: 'Sécurité',
     enseignant: 'SANKARA Mariam',
@@ -294,7 +262,7 @@ const INITIAL_SEANCES = [
   },
   {
     id: 's15',
-    weekKey: '2026-05-04',
+    weekKey: DEMO_NEXT_WEEK_KEY,
     classe: 'Master 1 RSI',
     matiere: 'Sécurité des Réseaux',
     enseignant: 'OUEDRAOGO Issa',
@@ -312,7 +280,7 @@ const INITIAL_POINTAGES = [
   {
     id: 'p1',
     seanceId: 's1',
-    date: '2026-04-27',
+    date: getDemoDateForDay(DEMO_WEEK_KEY, 'Lundi'),
     statut: 'present',
     heureScan: '07h32',
     validePar: 'TRAORE Jean',
@@ -320,7 +288,7 @@ const INITIAL_POINTAGES = [
   {
     id: 'p2',
     seanceId: 's4',
-    date: '2026-04-30',
+    date: getDemoDateForDay(DEMO_WEEK_KEY, 'Jeudi'),
     statut: 'present',
     heureScan: '13h05',
     validePar: 'SANKARA Mariam',
@@ -328,7 +296,7 @@ const INITIAL_POINTAGES = [
   {
     id: 'p3',
     seanceId: 's9',
-    date: '2026-04-29',
+    date: getDemoDateForDay(DEMO_WEEK_KEY, 'Mercredi'),
     statut: 'retard',
     heureScan: '13h18',
     validePar: 'NIKIEMA Salif',
@@ -395,25 +363,26 @@ const INITIAL_ACTIVITIES = [
     type: 'pointage',
     title: 'Pointage effectué',
     text: 'Programmation Web - Licence 1 RIT',
-    date: '2026-04-27 07:32',
+    date: `${getDemoDateForDay(DEMO_WEEK_KEY, 'Lundi')} 07:32`,
   },
   {
     id: 'a2',
     type: 'cahier',
     title: 'Cahier de texte signé',
     text: 'Programmation Web - TRAORE Jean',
-    date: '2026-04-27 09:25',
+    date: `${getDemoDateForDay(DEMO_WEEK_KEY, 'Lundi')} 09:25`,
   },
   {
     id: 'a3',
     type: 'vacation',
     title: 'Fiche de vacation validée',
     text: 'TRAORE Jean - 20 000 FCFA',
-    date: '2026-04-27 10:00',
+    date: `${getDemoDateForDay(DEMO_WEEK_KEY, 'Lundi')} 10:00`,
   },
 ]
 
 const initialStore = {
+  version: STORE_VERSION,
   seances: INITIAL_SEANCES,
   pointages: INITIAL_POINTAGES,
   cahiers: INITIAL_CAHIERS,
@@ -422,6 +391,49 @@ const initialStore = {
 }
 
 let currentStore = loadStore()
+
+export function generateWeekOptions({ weeksBefore = 8, weeksAfter = 24 } = {}) {
+  const currentMonday = getMondayDate(new Date())
+  const weeks = []
+
+  for (let offset = -weeksBefore; offset <= weeksAfter; offset += 1) {
+    const monday = new Date(currentMonday)
+    monday.setDate(currentMonday.getDate() + offset * 7)
+
+    const saturday = new Date(monday)
+    saturday.setDate(monday.getDate() + 5)
+
+    const key = toIsoDate(monday)
+    const startLabel = formatShortDate(monday)
+    const endLabel = formatShortDate(saturday)
+
+    weeks.push({
+      key,
+      label: `${startLabel} au ${endLabel}${
+        offset === 0 ? ' — semaine actuelle' : ''
+      }`,
+      title: `EMPLOI DU TEMPS DU ${startLabel.toUpperCase()} AU ${endLabel.toUpperCase()}`,
+      start: toIsoDate(monday),
+      startDate: toIsoDate(monday),
+      end: toIsoDate(saturday),
+      endDate: toIsoDate(saturday),
+      days: WEEK_DAYS.map((dayName, index) => {
+        const date = new Date(monday)
+        date.setDate(monday.getDate() + index)
+
+        return {
+          key: dayName,
+          label: `${dayName} ${String(date.getDate()).padStart(2, '0')}`,
+          fullLabel: `${dayName} ${formatShortDate(date)}`,
+          date: toIsoDate(date),
+          isoDate: toIsoDate(date),
+        }
+      }),
+    })
+  }
+
+  return weeks
+}
 
 function loadStore() {
   try {
@@ -434,7 +446,13 @@ function loadStore() {
 
     const parsed = JSON.parse(raw)
 
+    if (!parsed.version || parsed.version < STORE_VERSION) {
+      localStorage.setItem(STORE_KEY, JSON.stringify(initialStore))
+      return initialStore
+    }
+
     return {
+      version: STORE_VERSION,
       seances: Array.isArray(parsed.seances) ? parsed.seances : INITIAL_SEANCES,
       pointages: Array.isArray(parsed.pointages)
         ? parsed.pointages
@@ -454,8 +472,12 @@ function loadStore() {
 }
 
 function saveStore(nextStore) {
-  currentStore = nextStore
-  localStorage.setItem(STORE_KEY, JSON.stringify(nextStore))
+  currentStore = {
+    version: STORE_VERSION,
+    ...nextStore,
+  }
+
+  localStorage.setItem(STORE_KEY, JSON.stringify(currentStore))
   window.dispatchEvent(new CustomEvent('eduschedule-store-updated'))
 }
 
@@ -706,7 +728,7 @@ export const appActions = {
     const pointage = {
       id: existing?.id || `p-${Date.now()}`,
       seanceId,
-      date: new Date().toISOString().slice(0, 10),
+      date: getWeekDayDate(seance.weekKey, seance.jour) || getTodayIsoDate(),
       statut: status,
       heureScan: getCurrentTimeLabel(),
       validePar: userName,
@@ -984,6 +1006,7 @@ export function slotsOverlap(slotA, slotB) {
 
 export function parseSlot(slot = '') {
   const normalized = slot
+    .toString()
     .toLowerCase()
     .replace(/\s+/g, '')
     .replace(/à/g, '-')
@@ -1050,6 +1073,36 @@ export function getDurationHours(slot = '') {
   return Math.max(0, (parsed.end - parsed.start) / 60)
 }
 
+export function getWeekByKey(weekKey) {
+  return WEEK_OPTIONS.find((week) => week.key === weekKey) || WEEK_OPTIONS[0]
+}
+
+export function getCurrentWeek() {
+  return getWeekByKey(DEFAULT_WEEK_KEY)
+}
+
+export function getWeekDayDate(weekKey, dayName) {
+  const week = getWeekByKey(weekKey)
+  const day = week.days.find((item) => item.key === dayName)
+
+  return day?.date || null
+}
+
+export function getTodayIsoDate() {
+  return toIsoDate(new Date())
+}
+
+function getWeekKeyByOffset(offset = 0) {
+  const monday = getMondayDate(new Date())
+  monday.setDate(monday.getDate() + offset * 7)
+
+  return toIsoDate(monday)
+}
+
+function getDemoDateForDay(weekKey, dayName) {
+  return getWeekDayDate(weekKey, dayName) || getTodayIsoDate()
+}
+
 function getCurrentTimeLabel() {
   const now = new Date()
   const h = String(now.getHours()).padStart(2, '0')
@@ -1057,6 +1110,37 @@ function getCurrentTimeLabel() {
 
   return `${h}h${m}`
 }
+
+function getMondayDate(date) {
+  const copy = new Date(date)
+  const day = copy.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+
+  copy.setDate(copy.getDate() + diff)
+  copy.setHours(0, 0, 0, 0)
+
+  return copy
+}
+
+function getMondayIsoDate(date) {
+  return toIsoDate(getMondayDate(date))
+}
+
+function toIsoDate(date) {
+  const offset = date.getTimezoneOffset()
+  const local = new Date(date.getTime() - offset * 60 * 1000)
+
+  return local.toISOString().slice(0, 10)
+}
+
+function formatShortDate(date) {
+  return date.toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  })
+}
+
 export function getTeacherNameFromUser(user) {
   const email = (user?.email || '').toLowerCase()
 

@@ -75,7 +75,7 @@ function ensure_tables($pdo) {
             creneau_id INT NOT NULL,
             enseignant_id INT NOT NULL,
             date_cours DATE NOT NULL,
-            statut ENUM('present', 'retard') NOT NULL DEFAULT 'present',
+            statut ENUM('present', 'retard', 'absent') NOT NULL DEFAULT 'present',
             scanned_at DATETIME NOT NULL,
             device_info TEXT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -87,14 +87,34 @@ function ensure_tables($pdo) {
             INDEX (statut)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ");
+
+    // Si la table existait déjà avec ENUM('present','retard'), on l’élargit pour ajouter absent.
+    try {
+        $pdo->exec("
+            ALTER TABLE presences_professeurs
+            MODIFY statut ENUM('present', 'retard', 'absent') NOT NULL DEFAULT 'present'
+        ");
+    } catch (Throwable $e) {
+        // On ignore si MySQL dit que la modification est déjà appliquée.
+    }
 }
 
+/* ============================================================
+   DÉTECTION AUTOMATIQUE IP PC / WAMP
+   ============================================================ */
+
 function is_private_lan_ip($ip) {
+    $ip = trim((string)$ip);
+
     if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
         return false;
     }
 
-    if ($ip === "127.0.0.1" || strpos($ip, "169.254.") === 0) {
+    if ($ip === "127.0.0.1") {
+        return false;
+    }
+
+    if (strpos($ip, "169.254.") === 0) {
         return false;
     }
 
@@ -117,32 +137,67 @@ function ip_score($ip) {
     $score = 0;
 
     if (strpos($ip, "192.168.") === 0) {
-        $score += 50;
+        $score += 80;
     }
 
     if (strpos($ip, "10.") === 0) {
-        $score += 35;
+        $score += 60;
     }
 
     if (preg_match('/^172\.(1[6-9]|2[0-9]|3[0-1])\./', $ip)) {
-        $score += 30;
+        $score += 50;
     }
 
-    // On pénalise les réseaux virtuels souvent utilisés par VirtualBox / VMware / VPN.
+    if (strpos($ip, "192.168.11.") === 0) {
+        $score += 100;
+    }
+
     if (
         strpos($ip, "192.168.56.") === 0 ||
         strpos($ip, "192.168.8.") === 0 ||
         strpos($ip, "192.168.80.") === 0
     ) {
-        $score -= 40;
-    }
-
-    // Ton réseau Wi-Fi récent était en 192.168.11.x, on le priorise si présent.
-    if (strpos($ip, "192.168.11.") === 0) {
-        $score += 50;
+        $score -= 100;
     }
 
     return $score;
+}
+
+function extract_ipv4_from_text($text) {
+    $ips = [];
+
+    preg_match_all('/\b(?:\d{1,3}\.){3}\d{1,3}\b/', (string)$text, $matches);
+
+    foreach ($matches[0] ?? [] as $ip) {
+        if (is_private_lan_ip($ip)) {
+            $ips[] = $ip;
+        }
+    }
+
+    return $ips;
+}
+
+function run_command_capture($command) {
+    $output = "";
+
+    if (function_exists("shell_exec")) {
+        $result = @shell_exec($command);
+
+        if (is_string($result) && trim($result) !== "") {
+            $output .= "\n" . $result;
+        }
+    }
+
+    if (function_exists("exec")) {
+        $lines = [];
+        @exec($command, $lines);
+
+        if (!empty($lines)) {
+            $output .= "\n" . implode("\n", $lines);
+        }
+    }
+
+    return $output;
 }
 
 function get_lan_ip_candidates() {
@@ -151,7 +206,8 @@ function get_lan_ip_candidates() {
     $serverCandidates = [
         $_SERVER["LOCAL_ADDR"] ?? "",
         $_SERVER["SERVER_ADDR"] ?? "",
-        $_SERVER["HTTP_HOST"] ?? ""
+        $_SERVER["HTTP_HOST"] ?? "",
+        gethostbyname(gethostname())
     ];
 
     foreach ($serverCandidates as $candidate) {
@@ -163,21 +219,12 @@ function get_lan_ip_candidates() {
         }
     }
 
-    if (function_exists("shell_exec")) {
-        $output = @shell_exec("ipconfig 2>NUL");
+    $ipconfigOutput = run_command_capture("ipconfig");
+    $ips = array_merge($ips, extract_ipv4_from_text($ipconfigOutput));
 
-        if ($output) {
-            preg_match_all('/(?:IPv4[^:\r\n]*|Adresse IPv4[^:\r\n]*)[^\r\n:]*:\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3})/iu', $output, $matches);
-
-            if (!empty($matches[1])) {
-                foreach ($matches[1] as $ip) {
-                    if (is_private_lan_ip($ip)) {
-                        $ips[] = $ip;
-                    }
-                }
-            }
-        }
-    }
+    $powershellCommand = "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Get-NetIPAddress -AddressFamily IPv4 | Where-Object { \$_.IPAddress -notlike '127.*' -and \$_.IPAddress -notlike '169.254.*' } | Select-Object -ExpandProperty IPAddress\"";
+    $powershellOutput = run_command_capture($powershellCommand);
+    $ips = array_merge($ips, extract_ipv4_from_text($powershellOutput));
 
     $ips = array_values(array_unique($ips));
 
@@ -193,14 +240,7 @@ function get_network_info() {
     $ip = $candidates[0] ?? null;
 
     if (!$ip) {
-        $host = $_SERVER["HTTP_HOST"] ?? "127.0.0.1";
-        $host = preg_replace('/:\d+$/', '', $host);
-
-        if ($host === "localhost") {
-            $host = "127.0.0.1";
-        }
-
-        $ip = $host;
+        $ip = "127.0.0.1";
     }
 
     $scheme = "http";
@@ -208,7 +248,6 @@ function get_network_info() {
     $portPart = ($port && $port !== "80") ? ":" . $port : "";
 
     $scriptPath = $_SERVER["SCRIPT_NAME"] ?? "/EduSchedule-Pro/backend/api/teacher_qr.php";
-
     $mobileUrl = $scheme . "://" . $ip . $portPart . $scriptPath;
 
     return [
@@ -222,6 +261,10 @@ function get_network_info() {
 function network_action() {
     json_response(true, "Adresse réseau détectée.", get_network_info());
 }
+
+/* ============================================================
+   COURS / HORAIRES / POINTAGE
+   ============================================================ */
 
 function get_creneau($pdo, $id) {
     $stmt = $pdo->prepare("
@@ -361,6 +404,10 @@ function get_scan_status($dateCours, $horaireLabel) {
     ];
 }
 
+/* ============================================================
+   LISTE DES DONNÉES POUR REACT
+   ============================================================ */
+
 function list_data($pdo) {
     ensure_tables($pdo);
 
@@ -474,6 +521,10 @@ function list_data($pdo) {
     ]);
 }
 
+/* ============================================================
+   GÉNÉRATION QR
+   ============================================================ */
+
 function generate_qr($pdo) {
     ensure_tables($pdo);
 
@@ -536,6 +587,79 @@ function generate_qr($pdo) {
         "creneau" => $creneau
     ]);
 }
+
+/* ============================================================
+   POINTAGE MANUEL
+   ============================================================ */
+
+function manual_pointage($pdo) {
+    ensure_tables($pdo);
+
+    $data = body();
+
+    $creneauId = (int)($data["creneau_id"] ?? 0);
+    $dateCours = trim((string)($data["date_cours"] ?? ""));
+    $statut = trim((string)($data["statut"] ?? ""));
+    $createdBy = trim((string)($data["created_by"] ?? ""));
+
+    $allowedStatuses = ["present", "retard", "absent"];
+
+    if ($creneauId <= 0 || $dateCours === "" || $statut === "") {
+        json_response(false, "Cours, date et statut obligatoires.", null, 400);
+    }
+
+    if (!in_array($statut, $allowedStatuses, true)) {
+        json_response(false, "Statut invalide.", null, 400);
+    }
+
+    $creneau = get_creneau($pdo, $creneauId);
+
+    if (!$creneau) {
+        json_response(false, "Créneau introuvable.", null, 404);
+    }
+
+    $now = new DateTime("now", new DateTimeZone("Africa/Ouagadougou"));
+    $deviceInfo = "Pointage manuel";
+    if ($createdBy !== "") {
+        $deviceInfo .= " par " . $createdBy;
+    }
+
+    try {
+        $stmt = $pdo->prepare("
+            INSERT INTO presences_professeurs
+                (token_id, creneau_id, enseignant_id, date_cours, statut, scanned_at, device_info)
+            VALUES
+                (NULL, :creneau_id, :enseignant_id, :date_cours, :statut, :scanned_at, :device_info)
+            ON DUPLICATE KEY UPDATE
+                token_id = NULL,
+                statut = VALUES(statut),
+                scanned_at = VALUES(scanned_at),
+                device_info = VALUES(device_info)
+        ");
+
+        $stmt->execute([
+            ":creneau_id" => $creneauId,
+            ":enseignant_id" => $creneau["enseignant_id"],
+            ":date_cours" => $dateCours,
+            ":statut" => $statut,
+            ":scanned_at" => $now->format("Y-m-d H:i:s"),
+            ":device_info" => $deviceInfo
+        ]);
+
+        json_response(true, "Pointage manuel enregistré.", [
+            "creneau" => $creneau,
+            "date_cours" => $dateCours,
+            "statut" => $statut,
+            "scanned_at" => $now->format("Y-m-d H:i:s")
+        ]);
+    } catch (Throwable $e) {
+        json_response(false, "Erreur pointage manuel : " . $e->getMessage(), null, 500);
+    }
+}
+
+/* ============================================================
+   SCAN QR
+   ============================================================ */
 
 function scan_qr($pdo) {
     ensure_tables($pdo);
@@ -673,6 +797,10 @@ function scan_qr($pdo) {
         "end_at" => $status["end"] ?? null
     ]);
 }
+
+/* ============================================================
+   PAGE MOBILE DU SCAN
+   ============================================================ */
 
 function render_scan_page($data) {
     $type = $data["type"] ?? "success";
@@ -821,7 +949,10 @@ function render_scan_page($data) {
     exit;
 }
 
-$pdo = db();
+/* ============================================================
+   ROUTER API
+   ============================================================ */
+
 $action = $_GET["action"] ?? "list";
 
 try {
@@ -829,12 +960,18 @@ try {
         network_action();
     }
 
+    $pdo = db();
+
     if ($action === "list") {
         list_data($pdo);
     }
 
     if ($action === "generate") {
         generate_qr($pdo);
+    }
+
+    if ($action === "manual") {
+        manual_pointage($pdo);
     }
 
     if ($action === "scan") {
