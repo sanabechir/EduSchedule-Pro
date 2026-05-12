@@ -56,6 +56,20 @@ function normalize_text($value) {
     return trim((string)$value);
 }
 
+function normalize_person_key($value) {
+    $value = trim((string)$value);
+
+    if (function_exists("mb_strtolower")) {
+        $value = mb_strtolower($value, "UTF-8");
+    } else {
+        $value = strtolower($value);
+    }
+
+    $value = preg_replace('/\s+/', ' ', $value);
+
+    return $value;
+}
+
 function normalize_horaire_label($value) {
     $value = trim((string)$value);
 
@@ -187,10 +201,12 @@ function find_matiere_id($pdo, $matiereName, $classeId) {
         AND classe_id = :classe_id
         LIMIT 1
     ");
+
     $stmt->execute([
         ":nom" => $matiereName,
         ":classe_id" => $classeId
     ]);
+
     $row = $stmt->fetch();
 
     if ($row) {
@@ -203,6 +219,7 @@ function find_matiere_id($pdo, $matiereName, $classeId) {
         WHERE nom = :nom
         LIMIT 1
     ");
+
     $stmt->execute([":nom" => $matiereName]);
     $row = $stmt->fetch();
 
@@ -214,6 +231,7 @@ function find_matiere_id($pdo, $matiereName, $classeId) {
         INSERT INTO matieres (nom, classe_id)
         VALUES (:nom, :classe_id)
     ");
+
     $insert->execute([
         ":nom" => $matiereName,
         ":classe_id" => $classeId
@@ -238,6 +256,7 @@ function find_enseignant_id($pdo, $teacherName) {
         OR email = :nom_complet
         LIMIT 1
     ");
+
     $stmt->execute([":nom_complet" => $teacherName]);
     $row = $stmt->fetch();
 
@@ -248,16 +267,89 @@ function find_enseignant_id($pdo, $teacherName) {
     return (int)$row["id"];
 }
 
+function get_teacher_by_id($pdo, $enseignantId) {
+    $stmt = $pdo->prepare("
+        SELECT 
+            id,
+            nom,
+            prenom,
+            email,
+            CONCAT(nom, ' ', prenom) AS nom_complet
+        FROM enseignants
+        WHERE id = :id
+        LIMIT 1
+    ");
+
+    $stmt->execute([":id" => $enseignantId]);
+
+    return $stmt->fetch();
+}
+
+function same_teacher_identity($newTeacher, $existing) {
+    if (!$newTeacher || !$existing) {
+        return false;
+    }
+
+    if ((int)$existing["enseignant_id"] === (int)$newTeacher["id"]) {
+        return true;
+    }
+
+    $newEmail = normalize_person_key($newTeacher["email"] ?? "");
+    $oldEmail = normalize_person_key($existing["enseignant_email"] ?? "");
+
+    if ($newEmail !== "" && $oldEmail !== "" && $newEmail === $oldEmail) {
+        return true;
+    }
+
+    $newNom = normalize_person_key($newTeacher["nom"] ?? "");
+    $newPrenom = normalize_person_key($newTeacher["prenom"] ?? "");
+
+    $oldNom = normalize_person_key($existing["enseignant_nom"] ?? "");
+    $oldPrenom = normalize_person_key($existing["enseignant_prenom"] ?? "");
+
+    $newFullName1 = normalize_person_key($newNom . " " . $newPrenom);
+    $newFullName2 = normalize_person_key($newPrenom . " " . $newNom);
+
+    $oldFullName1 = normalize_person_key($oldNom . " " . $oldPrenom);
+    $oldFullName2 = normalize_person_key($oldPrenom . " " . $oldNom);
+
+    if ($newNom !== "" && $newPrenom !== "" && $oldNom !== "" && $oldPrenom !== "") {
+        if ($newFullName1 === $oldFullName1) {
+            return true;
+        }
+
+        if ($newFullName1 === $oldFullName2) {
+            return true;
+        }
+
+        if ($newFullName2 === $oldFullName1) {
+            return true;
+        }
+
+        if ($newFullName2 === $oldFullName2) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function get_existing_creneaux_for_day($pdo, $jour) {
     $stmt = $pdo->prepare("
         SELECT
             c.id,
             c.classe_id,
             cl.nom AS classe,
+
             c.enseignant_id,
+            e.nom AS enseignant_nom,
+            e.prenom AS enseignant_prenom,
+            e.email AS enseignant_email,
             CONCAT(e.nom, ' ', e.prenom) AS enseignant,
+
             c.salle_id,
             s.nom AS salle,
+
             c.jour,
             c.horaire_id,
             h.label AS horaire,
@@ -279,6 +371,7 @@ function get_existing_creneaux_for_day($pdo, $jour) {
 function check_conflicts($pdo, $classeId, $enseignantId, $salleId, $jour, $newHoraireLabel) {
     $new = parse_horaire_minutes($newHoraireLabel);
     $existingCreneaux = get_existing_creneaux_for_day($pdo, $jour);
+    $newTeacher = get_teacher_by_id($pdo, $enseignantId);
 
     foreach ($existingCreneaux as $existing) {
         $old = parse_horaire_minutes($existing["horaire"]);
@@ -303,7 +396,7 @@ function check_conflicts($pdo, $classeId, $enseignantId, $salleId, $jour, $newHo
             ];
         }
 
-        if ((int)$existing["enseignant_id"] === (int)$enseignantId) {
+        if (same_teacher_identity($newTeacher, $existing)) {
             return [
                 "type" => "enseignant",
                 "message" => "Conflit professeur : ce professeur a déjà un cours qui chevauche cet horaire.",
@@ -370,7 +463,7 @@ function list_schedule($pdo) {
             email,
             CONCAT(nom, ' ', prenom) AS nom_complet
         FROM enseignants
-        ORDER BY nom, prenom
+        ORDER BY nom, prenom, email
     ")->fetchAll();
 
     $matieres = $pdo->query("
