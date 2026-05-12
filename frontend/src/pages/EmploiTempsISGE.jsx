@@ -9,7 +9,6 @@ import { getClassNameFromUser, getTeacherNameFromUser } from '../services/userSc
 import { exportHtmlToPdf } from '../services/pdfExport'
 import {
   getHolidayForWeekDay,
-  getIsoForWeekDay,
 } from '../services/burkinaHolidays'
 
 const API_BASE = 'http://127.0.0.1/EduSchedule-Pro/backend/api'
@@ -22,6 +21,7 @@ const EMPTY_FORM = {
   horaire: '',
   salle: '',
   type: 'cours',
+  groupe: '',
 }
 
 const DAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi']
@@ -65,6 +65,7 @@ function EmploiTempsISGE({ user }) {
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [customHoraireMode, setCustomHoraireMode] = useState(false)
 
   const [apiData, setApiData] = useState({
     seances: [],
@@ -79,7 +80,6 @@ function EmploiTempsISGE({ user }) {
     WEEK_OPTIONS.find((item) => item.key === selectedWeek) || WEEK_OPTIONS[0]
 
   const canManage = role === 'admin'
-  const timeRows = MAIN_TIME_ROWS
 
   const loadSchedule = async () => {
     try {
@@ -358,8 +358,10 @@ function EmploiTempsISGE({ user }) {
       horaire: horaires[0] || '07h30-09h30',
       salle: rooms[0] || '',
       type: 'cours',
+      groupe: '',
     })
 
+    setCustomHoraireMode(false)
     setShowForm(true)
     setMessage('')
   }
@@ -370,15 +372,22 @@ function EmploiTempsISGE({ user }) {
       return
     }
 
+    const normalizedHoraire = normalizeHoraireInput(form.horaire)
+
     if (
       !form.classe ||
       !form.matiere ||
       !form.enseignant ||
       !form.jour ||
-      !form.horaire ||
+      !normalizedHoraire ||
       !form.salle
     ) {
       setMessage('Tous les champs de la séance sont obligatoires.')
+      return
+    }
+
+    if (!isValidHoraire(normalizedHoraire)) {
+      setMessage('Format horaire invalide. Exemple accepté : 14h00-18h00.')
       return
     }
 
@@ -398,7 +407,10 @@ function EmploiTempsISGE({ user }) {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          horaire: normalizedHoraire,
+        }),
       })
 
       const text = await res.text()
@@ -417,6 +429,7 @@ function EmploiTempsISGE({ user }) {
       }
 
       setShowForm(false)
+      setCustomHoraireMode(false)
       setMessage('Séance ajoutée avec succès.')
       await loadSchedule()
     } catch (err) {
@@ -492,7 +505,7 @@ function EmploiTempsISGE({ user }) {
                 classe,
                 week,
                 selectedWeek,
-                timeRows,
+                MAIN_TIME_ROWS,
                 getSeancesForCell,
               )}
             </div>
@@ -677,19 +690,50 @@ function EmploiTempsISGE({ user }) {
             </div>
 
             <div className="isge-filter">
-              <label>Horaire réel</label>
+              <label>Mode horaire</label>
               <select
-                value={form.horaire}
-                onChange={(e) => updateForm('horaire', e.target.value)}
+                value={customHoraireMode ? 'custom' : 'existing'}
+                onChange={(e) => {
+                  const isCustom = e.target.value === 'custom'
+                  setCustomHoraireMode(isCustom)
+
+                  if (isCustom) {
+                    updateForm('horaire', '')
+                  } else {
+                    updateForm('horaire', horaires[0] || '')
+                  }
+                }}
               >
-                <option value="">Choisir un horaire</option>
-                {horaires.map((horaire) => (
-                  <option key={horaire} value={horaire}>
-                    {formatSlot(horaire)}
-                  </option>
-                ))}
+                <option value="existing">Horaire disponible</option>
+                <option value="custom">Créer un horaire personnalisé</option>
               </select>
             </div>
+
+            {!customHoraireMode ? (
+              <div className="isge-filter">
+                <label>Horaire disponible</label>
+                <select
+                  value={form.horaire}
+                  onChange={(e) => updateForm('horaire', e.target.value)}
+                >
+                  <option value="">Choisir un horaire</option>
+                  {horaires.map((horaire) => (
+                    <option key={horaire} value={horaire}>
+                      {formatSlot(horaire)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="isge-filter custom-horaire-field">
+                <label>Horaire personnalisé</label>
+                <input
+                  value={form.horaire}
+                  onChange={(e) => updateForm('horaire', e.target.value)}
+                  placeholder="Exemple : 14h00-18h00"
+                />
+              </div>
+            )}
 
             <div className="isge-filter">
               <label>Salle</label>
@@ -717,6 +761,24 @@ function EmploiTempsISGE({ user }) {
                 <option value="tp">TP</option>
               </select>
             </div>
+
+            <div className="isge-filter">
+              <label>Groupe</label>
+              <input
+                value={form.groupe}
+                onChange={(e) => updateForm('groupe', e.target.value)}
+                placeholder="Ex : Groupe 1, A, B..."
+              />
+            </div>
+          </div>
+
+          <div className="horaire-helper">
+            <strong>Créneau personnalisé</strong>
+            <span>
+              Tu peux saisir un horaire comme 09h00-13h00, 13h00-16h00,
+              14h00-18h00. Il sera ajouté automatiquement dans MySQL s’il
+              n’existe pas encore.
+            </span>
           </div>
 
           <div className="emploi-form-actions">
@@ -738,7 +800,7 @@ function EmploiTempsISGE({ user }) {
             classe={classe}
             week={week}
             selectedWeek={selectedWeek}
-            timeRows={timeRows}
+            timeRows={MAIN_TIME_ROWS}
             canManage={canManage}
             getSeancesForCell={getSeancesForCell}
             onDelete={deleteSeance}
@@ -855,6 +917,11 @@ function ClassScheduleTable({
                               <strong>{seance.matiere}</strong>
                               <small>{seance.enseignant}</small>
                               <small>{seance.salle}</small>
+
+                              {seance.groupe && (
+                                <small>Groupe : {seance.groupe}</small>
+                              )}
+
                               <em>{seance.type?.toUpperCase() || 'COURS'}</em>
 
                               {canManage && (
@@ -891,10 +958,7 @@ function buildClassSchedulePdf(
 ) {
   return `
     <style>
-      .pdf-class-block {
-        margin-top: 8px;
-      }
-
+      .pdf-class-block { margin-top: 8px; }
       .pdf-class-title {
         display: flex;
         justify-content: space-between;
@@ -906,25 +970,21 @@ function buildClassSchedulePdf(
         background: #f4f0ff;
         color: #312e81;
       }
-
       .pdf-class-title strong {
         font-size: 20px;
         font-weight: 900;
       }
-
       .pdf-class-title span {
         font-size: 12px;
         font-weight: 800;
         color: #4f46e5;
       }
-
       .pdf-schedule-table {
         width: 100%;
         border-collapse: collapse;
         table-layout: fixed;
         font-size: 10.5px;
       }
-
       .pdf-schedule-table th {
         background: #eef2ff;
         color: #3730a3;
@@ -934,18 +994,15 @@ function buildClassSchedulePdf(
         padding: 8px;
         border: 1px solid #dbe3f1;
       }
-
       .pdf-schedule-table th.pdf-holiday-head {
         background: #fff7ed;
         color: #9a3412;
       }
-
       .pdf-schedule-table th span {
         display: block;
         margin-top: 3px;
         font-size: 8px;
       }
-
       .pdf-schedule-table td {
         height: 96px;
         padding: 7px;
@@ -953,7 +1010,6 @@ function buildClassSchedulePdf(
         vertical-align: top;
         background: #ffffff;
       }
-
       .pdf-schedule-table .time-cell {
         width: 92px;
         background: #f8fafc;
@@ -962,7 +1018,6 @@ function buildClassSchedulePdf(
         text-align: center;
         vertical-align: middle;
       }
-
       .pdf-course {
         padding: 7px 8px;
         border-left: 4px solid #4f46e5;
@@ -970,7 +1025,6 @@ function buildClassSchedulePdf(
         background: #f8fafc;
         margin-bottom: 5px;
       }
-
       .pdf-course .bracket {
         display: block;
         margin-bottom: 4px;
@@ -978,7 +1032,6 @@ function buildClassSchedulePdf(
         font-size: 10px;
         font-weight: 900;
       }
-
       .pdf-course strong {
         display: block;
         color: #0f172a;
@@ -986,7 +1039,6 @@ function buildClassSchedulePdf(
         line-height: 1.25;
         font-weight: 900;
       }
-
       .pdf-course span {
         display: block;
         margin-top: 3px;
@@ -995,7 +1047,6 @@ function buildClassSchedulePdf(
         line-height: 1.2;
         font-weight: 700;
       }
-
       .pdf-course small {
         display: block;
         margin-top: 3px;
@@ -1005,20 +1056,17 @@ function buildClassSchedulePdf(
         font-weight: 900;
         text-transform: uppercase;
       }
-
       .pdf-empty {
         color: #cbd5e1;
         text-align: center;
         font-weight: 900;
       }
-
       .pdf-holiday-cell {
         background: #d9d9d9 !important;
         color: #111827;
         text-align: center;
         vertical-align: middle !important;
       }
-
       .pdf-holiday-cell .ferie {
         display: inline-block;
         transform: rotate(-45deg);
@@ -1110,6 +1158,11 @@ function buildClassSchedulePdf(
                                         <strong>${escapeHtml(seance.matiere)}</strong>
                                         <span>${escapeHtml(seance.enseignant)}</span>
                                         <span>${escapeHtml(seance.salle)}</span>
+                                        ${
+                                          seance.groupe
+                                            ? `<span>Groupe : ${escapeHtml(seance.groupe)}</span>`
+                                            : ''
+                                        }
                                         <small>${escapeHtml(
                                           seance.type?.toUpperCase() || 'COURS',
                                         )}</small>
@@ -1147,7 +1200,6 @@ function sortHoraires(values) {
 
 function getHoraireStart(value) {
   const parsed = parseHoraire(value)
-
   return parsed ? parsed.start : 9999
 }
 
@@ -1167,11 +1219,34 @@ function getMainTimeRowForHoraire(horaire) {
   return MAIN_TIME_ROWS[2]
 }
 
+function normalizeHoraireInput(value) {
+  const text = String(value || '')
+    .trim()
+    .replaceAll('[', '')
+    .replaceAll(']', '')
+    .replaceAll('H', 'h')
+    .replaceAll(' ', '')
+    .replaceAll('à', '-')
+    .replaceAll(':', '-')
+
+  const parsed = parseHoraire(text)
+
+  if (!parsed) return text
+
+  return `${formatMinuteCompact(parsed.start)}-${formatMinuteCompact(parsed.end)}`
+}
+
+function isValidHoraire(value) {
+  return Boolean(parseHoraire(value))
+}
+
 function parseHoraire(value) {
   const text = String(value || '')
     .trim()
     .replaceAll('[', '')
     .replaceAll(']', '')
+    .replaceAll('H', 'h')
+    .replaceAll(' ', '')
 
   const match = text.match(
     /(\d{1,2})h?(\d{2})?\s*[-:à]\s*(\d{1,2})h?(\d{2})?/i,
@@ -1184,9 +1259,20 @@ function parseHoraire(value) {
   const endHour = Number(match[3] || 0)
   const endMin = Number(match[4] || 0)
 
+  if (startHour > 23 || endHour > 23 || startMin > 59 || endMin > 59) {
+    return null
+  }
+
+  const start = startHour * 60 + startMin
+  const end = endHour * 60 + endMin
+
+  if (end <= start) {
+    return null
+  }
+
   return {
-    start: startHour * 60 + startMin,
-    end: endHour * 60 + endMin,
+    start,
+    end,
   }
 }
 
@@ -1206,6 +1292,13 @@ function formatBracketTime(horaire) {
   return `[${formatMinuteForBracket(parsed.start)} : ${formatMinuteForBracket(
     parsed.end,
   )}]`
+}
+
+function formatMinuteCompact(totalMinutes) {
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+
+  return `${String(hours).padStart(2, '0')}h${String(minutes).padStart(2, '0')}`
 }
 
 function formatMinuteForBracket(totalMinutes) {

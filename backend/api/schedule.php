@@ -1,8 +1,11 @@
 <?php
+// backend/api/schedule.php
+
+date_default_timezone_set("Africa/Ouagadougou");
+
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Headers: Content-Type, Authorization");
-header("Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS");
-header("Content-Type: application/json; charset=utf-8");
+header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
 
 if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
     http_response_code(200);
@@ -11,11 +14,14 @@ if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
 
 function json_response($success, $message, $data = null, $status = 200) {
     http_response_code($status);
+    header("Content-Type: application/json; charset=utf-8");
+
     echo json_encode([
         "success" => $success,
         "message" => $message,
         "data" => $data
     ], JSON_UNESCAPED_UNICODE);
+
     exit;
 }
 
@@ -38,102 +44,193 @@ function db() {
 function body() {
     $raw = file_get_contents("php://input");
     $json = json_decode($raw, true);
-    return is_array($json) ? $json : $_POST;
-}
 
-function get_id($pdo, $table, $field, $value) {
-    $allowed = ["classes", "matieres", "enseignants", "salles", "horaires"];
-
-    if (!in_array($table, $allowed, true)) {
-        return null;
+    if (is_array($json)) {
+        return $json;
     }
 
-    $sql = "SELECT id FROM $table WHERE $field = :value LIMIT 1";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([":value" => $value]);
-    $row = $stmt->fetch();
-
-    return $row ? (int) $row["id"] : null;
+    return $_POST;
 }
 
-function get_teacher_id($pdo, $value) {
-    $stmt = $pdo->prepare("
-        SELECT id
-        FROM enseignants
-        WHERE email = :value
-           OR CONCAT(nom, ' ', prenom) = :value
-           OR CONCAT(prenom, ' ', nom) = :value
-        LIMIT 1
-    ");
-
-    $stmt->execute([":value" => $value]);
-    $row = $stmt->fetch();
-
-    return $row ? (int) $row["id"] : null;
+function normalize_text($value) {
+    return trim((string)$value);
 }
 
-function get_or_create_matiere($pdo, $nom, $classe_id) {
-    $stmt = $pdo->prepare("SELECT id FROM matieres WHERE nom = :nom AND classe_id = :classe_id LIMIT 1");
-    $stmt->execute([
-        ":nom" => $nom,
-        ":classe_id" => $classe_id
-    ]);
+function normalize_horaire_label($value) {
+    $value = trim((string)$value);
 
+    if ($value === "") {
+        return "";
+    }
+
+    $value = str_replace(["[", "]"], "", $value);
+    $value = str_replace(["H", " "], ["h", ""], $value);
+    $value = str_replace(["à", "–", "—", ":"], "-", $value);
+
+    if (preg_match('/^(\d{1,2})h?(\d{2})?-(\d{1,2})h?(\d{2})?$/i', $value, $m)) {
+        $sh = str_pad($m[1], 2, "0", STR_PAD_LEFT);
+        $sm = isset($m[2]) && $m[2] !== "" ? str_pad($m[2], 2, "0", STR_PAD_LEFT) : "00";
+        $eh = str_pad($m[3], 2, "0", STR_PAD_LEFT);
+        $em = isset($m[4]) && $m[4] !== "" ? str_pad($m[4], 2, "0", STR_PAD_LEFT) : "00";
+
+        return "{$sh}h{$sm}-{$eh}h{$em}";
+    }
+
+    return $value;
+}
+
+function find_or_create_horaire($pdo, $label) {
+    $label = normalize_horaire_label($label);
+
+    if ($label === "") {
+        throw new Exception("Horaire obligatoire.");
+    }
+
+    $stmt = $pdo->prepare("SELECT id, label FROM horaires WHERE label = :label LIMIT 1");
+    $stmt->execute([":label" => $label]);
     $row = $stmt->fetch();
 
     if ($row) {
-        return (int) $row["id"];
+        return [
+            "id" => (int)$row["id"],
+            "label" => $row["label"]
+        ];
     }
 
-    $stmt = $pdo->prepare("INSERT INTO matieres (nom, classe_id) VALUES (:nom, :classe_id)");
+    $insert = $pdo->prepare("INSERT INTO horaires (label) VALUES (:label)");
+    $insert->execute([":label" => $label]);
+
+    return [
+        "id" => (int)$pdo->lastInsertId(),
+        "label" => $label
+    ];
+}
+
+function find_classe_id($pdo, $classeName) {
+    $classeName = normalize_text($classeName);
+
+    if ($classeName === "") {
+        throw new Exception("Classe obligatoire.");
+    }
+
+    $stmt = $pdo->prepare("SELECT id FROM classes WHERE nom = :nom LIMIT 1");
+    $stmt->execute([":nom" => $classeName]);
+    $row = $stmt->fetch();
+
+    if (!$row) {
+        throw new Exception("Classe introuvable : " . $classeName);
+    }
+
+    return (int)$row["id"];
+}
+
+function find_salle_id($pdo, $salleName) {
+    $salleName = normalize_text($salleName);
+
+    if ($salleName === "") {
+        throw new Exception("Salle obligatoire.");
+    }
+
+    $stmt = $pdo->prepare("SELECT id FROM salles WHERE nom = :nom LIMIT 1");
+    $stmt->execute([":nom" => $salleName]);
+    $row = $stmt->fetch();
+
+    if (!$row) {
+        throw new Exception("Salle introuvable : " . $salleName);
+    }
+
+    return (int)$row["id"];
+}
+
+function find_matiere_id($pdo, $matiereName, $classeId) {
+    $matiereName = normalize_text($matiereName);
+
+    if ($matiereName === "") {
+        throw new Exception("Matière obligatoire.");
+    }
+
+    $stmt = $pdo->prepare("
+        SELECT id 
+        FROM matieres 
+        WHERE nom = :nom 
+        AND classe_id = :classe_id
+        LIMIT 1
+    ");
     $stmt->execute([
-        ":nom" => $nom,
-        ":classe_id" => $classe_id
+        ":nom" => $matiereName,
+        ":classe_id" => $classeId
+    ]);
+    $row = $stmt->fetch();
+
+    if ($row) {
+        return (int)$row["id"];
+    }
+
+    $stmt = $pdo->prepare("
+        SELECT id 
+        FROM matieres 
+        WHERE nom = :nom
+        LIMIT 1
+    ");
+    $stmt->execute([":nom" => $matiereName]);
+    $row = $stmt->fetch();
+
+    if ($row) {
+        return (int)$row["id"];
+    }
+
+    $insert = $pdo->prepare("
+        INSERT INTO matieres (nom, classe_id)
+        VALUES (:nom, :classe_id)
+    ");
+    $insert->execute([
+        ":nom" => $matiereName,
+        ":classe_id" => $classeId
     ]);
 
-    return (int) $pdo->lastInsertId();
+    return (int)$pdo->lastInsertId();
 }
 
-function get_or_create_salle($pdo, $nom) {
-    $id = get_id($pdo, "salles", "nom", $nom);
+function find_enseignant_id($pdo, $teacherName) {
+    $teacherName = normalize_text($teacherName);
 
-    if ($id) {
-        return $id;
+    if ($teacherName === "") {
+        throw new Exception("Professeur obligatoire.");
     }
 
-    $stmt = $pdo->prepare("INSERT INTO salles (nom, capacite) VALUES (:nom, 40)");
-    $stmt->execute([":nom" => $nom]);
+    $stmt = $pdo->prepare("
+        SELECT id
+        FROM enseignants
+        WHERE CONCAT(nom, ' ', prenom) = :nom_complet
+        OR CONCAT(prenom, ' ', nom) = :nom_complet
+        OR nom = :nom_complet
+        OR email = :nom_complet
+        LIMIT 1
+    ");
+    $stmt->execute([":nom_complet" => $teacherName]);
+    $row = $stmt->fetch();
 
-    return (int) $pdo->lastInsertId();
-}
-
-function get_or_create_horaire($pdo, $label) {
-    $id = get_id($pdo, "horaires", "label", $label);
-
-    if ($id) {
-        return $id;
+    if (!$row) {
+        throw new Exception("Professeur introuvable : " . $teacherName);
     }
 
-    $stmt = $pdo->prepare("INSERT INTO horaires (label) VALUES (:label)");
-    $stmt->execute([":label" => $label]);
-
-    return (int) $pdo->lastInsertId();
+    return (int)$row["id"];
 }
 
 function list_schedule($pdo) {
     $seances = $pdo->query("
         SELECT
             c.id,
-            cl.id AS classe_id,
+            c.classe_id,
             cl.nom AS classe,
-            m.id AS matiere_id,
+            c.matiere_id,
             m.nom AS matiere,
-            e.id AS enseignant_id,
+            c.enseignant_id,
             CONCAT(e.nom, ' ', e.prenom) AS enseignant,
             e.email AS enseignant_email,
-            s.id AS salle_id,
+            c.salle_id,
             s.nom AS salle,
-            h.id AS horaire_id,
+            c.horaire_id,
             h.label AS horaire,
             c.jour,
             c.type,
@@ -144,10 +241,11 @@ function list_schedule($pdo) {
         JOIN enseignants e ON e.id = c.enseignant_id
         JOIN salles s ON s.id = c.salle_id
         JOIN horaires h ON h.id = c.horaire_id
-        ORDER BY
+        ORDER BY 
             cl.nom,
             FIELD(c.jour, 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'),
-            h.label
+            h.label,
+            m.nom
     ")->fetchAll();
 
     $classes = $pdo->query("
@@ -174,7 +272,7 @@ function list_schedule($pdo) {
             m.classe_id,
             cl.nom AS classe
         FROM matieres m
-        JOIN classes cl ON cl.id = m.classe_id
+        LEFT JOIN classes cl ON cl.id = m.classe_id
         ORDER BY cl.nom, m.nom
     ")->fetchAll();
 
@@ -203,129 +301,127 @@ function list_schedule($pdo) {
 function create_schedule($pdo) {
     $data = body();
 
-    $classe = trim($data["classe"] ?? "");
-    $matiere = trim($data["matiere"] ?? "");
-    $enseignant = trim($data["enseignant"] ?? "");
-    $jour = trim($data["jour"] ?? "");
-    $horaire = trim($data["horaire"] ?? "");
-    $salle = trim($data["salle"] ?? "");
-    $type = trim($data["type"] ?? "cours");
-    $groupe = trim($data["groupe"] ?? "");
+    $classe = normalize_text($data["classe"] ?? "");
+    $matiere = normalize_text($data["matiere"] ?? "");
+    $enseignant = normalize_text($data["enseignant"] ?? "");
+    $jour = normalize_text($data["jour"] ?? "");
+    $horaire = normalize_text($data["horaire"] ?? "");
+    $salle = normalize_text($data["salle"] ?? "");
+    $type = normalize_text($data["type"] ?? "cours");
+    $groupe = normalize_text($data["groupe"] ?? "");
 
     if ($classe === "" || $matiere === "" || $enseignant === "" || $jour === "" || $horaire === "" || $salle === "") {
         json_response(false, "Tous les champs sont obligatoires.", null, 400);
     }
 
-    if (!in_array($jour, ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"], true)) {
+    $allowedDays = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
+
+    if (!in_array($jour, $allowedDays, true)) {
         json_response(false, "Jour invalide.", null, 400);
     }
 
-    if (!in_array($type, ["cours", "td", "tp"], true)) {
+    $allowedTypes = ["cours", "td", "tp"];
+
+    if (!in_array($type, $allowedTypes, true)) {
         $type = "cours";
     }
 
-    $classe_id = get_id($pdo, "classes", "nom", $classe);
+    try {
+        $pdo->beginTransaction();
 
-    if (!$classe_id) {
-        json_response(false, "Classe introuvable : $classe", null, 404);
+        $classeId = find_classe_id($pdo, $classe);
+        $matiereId = find_matiere_id($pdo, $matiere, $classeId);
+        $enseignantId = find_enseignant_id($pdo, $enseignant);
+        $salleId = find_salle_id($pdo, $salle);
+        $horaireData = find_or_create_horaire($pdo, $horaire);
+        $horaireId = $horaireData["id"];
+
+        $check = $pdo->prepare("
+            SELECT 
+                c.id,
+                cl.nom AS classe,
+                m.nom AS matiere,
+                CONCAT(e.nom, ' ', e.prenom) AS enseignant,
+                s.nom AS salle,
+                h.label AS horaire,
+                c.jour
+            FROM creneaux c
+            JOIN classes cl ON cl.id = c.classe_id
+            JOIN matieres m ON m.id = c.matiere_id
+            JOIN enseignants e ON e.id = c.enseignant_id
+            JOIN salles s ON s.id = c.salle_id
+            JOIN horaires h ON h.id = c.horaire_id
+            WHERE c.classe_id = :classe_id
+            AND c.jour = :jour
+            AND c.horaire_id = :horaire_id
+            LIMIT 1
+        ");
+
+        $check->execute([
+            ":classe_id" => $classeId,
+            ":jour" => $jour,
+            ":horaire_id" => $horaireId
+        ]);
+
+        $existing = $check->fetch();
+
+        if ($existing) {
+            $pdo->rollBack();
+
+            json_response(false, "Cette classe a déjà un cours sur ce jour et cet horaire.", [
+                "existing" => $existing
+            ], 409);
+        }
+
+        $insert = $pdo->prepare("
+            INSERT INTO creneaux
+                (classe_id, matiere_id, enseignant_id, salle_id, jour, horaire_id, type, groupe)
+            VALUES
+                (:classe_id, :matiere_id, :enseignant_id, :salle_id, :jour, :horaire_id, :type, :groupe)
+        ");
+
+        $insert->execute([
+            ":classe_id" => $classeId,
+            ":matiere_id" => $matiereId,
+            ":enseignant_id" => $enseignantId,
+            ":salle_id" => $salleId,
+            ":jour" => $jour,
+            ":horaire_id" => $horaireId,
+            ":type" => $type,
+            ":groupe" => $groupe !== "" ? $groupe : null
+        ]);
+
+        $newId = (int)$pdo->lastInsertId();
+
+        $pdo->commit();
+
+        json_response(true, "Séance créée avec succès.", [
+            "id" => $newId,
+            "horaire" => $horaireData["label"]
+        ]);
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        json_response(false, "Erreur création séance : " . $e->getMessage(), null, 500);
     }
-
-    $enseignant_id = get_teacher_id($pdo, $enseignant);
-
-    if (!$enseignant_id) {
-        json_response(false, "Enseignant introuvable : $enseignant", null, 404);
-    }
-
-    $matiere_id = get_or_create_matiere($pdo, $matiere, $classe_id);
-    $salle_id = get_or_create_salle($pdo, $salle);
-    $horaire_id = get_or_create_horaire($pdo, $horaire);
-
-    $conflict = $pdo->prepare("
-        SELECT
-            c.id,
-            cl.nom AS classe,
-            m.nom AS matiere,
-            CONCAT(e.nom, ' ', e.prenom) AS enseignant,
-            s.nom AS salle,
-            c.jour,
-            h.label AS horaire
-        FROM creneaux c
-        JOIN classes cl ON cl.id = c.classe_id
-        JOIN matieres m ON m.id = c.matiere_id
-        JOIN enseignants e ON e.id = c.enseignant_id
-        JOIN salles s ON s.id = c.salle_id
-        JOIN horaires h ON h.id = c.horaire_id
-        WHERE c.jour = :jour
-          AND c.horaire_id = :horaire_id
-          AND (
-                c.classe_id = :classe_id
-             OR c.enseignant_id = :enseignant_id
-             OR c.salle_id = :salle_id
-          )
-        LIMIT 1
-    ");
-
-    $conflict->execute([
-        ":jour" => $jour,
-        ":horaire_id" => $horaire_id,
-        ":classe_id" => $classe_id,
-        ":enseignant_id" => $enseignant_id,
-        ":salle_id" => $salle_id
-    ]);
-
-    $row = $conflict->fetch();
-
-    if ($row) {
-        json_response(false, "Conflit détecté sur ce créneau.", [
-            "conflict" => $row
-        ], 409);
-    }
-
-    $stmt = $pdo->prepare("
-        INSERT INTO creneaux
-            (classe_id, matiere_id, enseignant_id, salle_id, jour, horaire_id, type, groupe)
-        VALUES
-            (:classe_id, :matiere_id, :enseignant_id, :salle_id, :jour, :horaire_id, :type, :groupe)
-    ");
-
-    $stmt->execute([
-        ":classe_id" => $classe_id,
-        ":matiere_id" => $matiere_id,
-        ":enseignant_id" => $enseignant_id,
-        ":salle_id" => $salle_id,
-        ":jour" => $jour,
-        ":horaire_id" => $horaire_id,
-        ":type" => $type,
-        ":groupe" => $groupe !== "" ? $groupe : null
-    ]);
-
-    json_response(true, "Séance créée avec succès.", [
-        "id" => (int) $pdo->lastInsertId()
-    ]);
 }
 
 function delete_schedule($pdo) {
     $data = body();
-    $id = (int)($data["id"] ?? $_GET["id"] ?? 0);
+    $id = (int)($data["id"] ?? 0);
 
     if ($id <= 0) {
         json_response(false, "ID invalide.", null, 400);
     }
 
-    try {
-        $stmt = $pdo->prepare("DELETE FROM creneaux WHERE id = :id");
-        $stmt->execute([":id" => $id]);
+    $stmt = $pdo->prepare("DELETE FROM creneaux WHERE id = :id");
+    $stmt->execute([":id" => $id]);
 
-        if ($stmt->rowCount() === 0) {
-            json_response(false, "Créneau introuvable.", null, 404);
-        }
-
-        json_response(true, "Créneau supprimé.");
-    } catch (PDOException $e) {
-        json_response(false, "Suppression impossible : ce créneau est peut-être lié à un pointage, un cahier ou une vacation.", [
-            "error" => $e->getMessage()
-        ], 409);
-    }
+    json_response(true, "Séance supprimée.", [
+        "id" => $id
+    ]);
 }
 
 $pdo = db();

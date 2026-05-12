@@ -511,3 +511,47 @@
     flex-direction: column;
   }
 }
+
+.custom-horaire-field {
+  animation: customHoraireAppear 0.18s ease;
+}
+
+.custom-horaire-field input {
+  border-color: #c4b5fd;
+  background: #faf5ff;
+}
+
+.horaire-helper {
+  display: grid;
+  gap: 6px;
+  margin-top: 20px;
+  padding: 15px 17px;
+  border: 1px solid #ddd6fe;
+  border-radius: 18px;
+  background: #faf5ff;
+  color: #5b21b6;
+}
+
+.horaire-helper strong {
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.horaire-helper span {
+  color: #6d28d9;
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 750;
+}
+
+@keyframes customHoraireAppear {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
