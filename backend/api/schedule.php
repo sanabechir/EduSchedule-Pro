@@ -79,12 +79,43 @@ function normalize_horaire_label($value) {
     return $value;
 }
 
-function find_or_create_horaire($pdo, $label) {
+function parse_horaire_minutes($label) {
     $label = normalize_horaire_label($label);
 
-    if ($label === "") {
-        throw new Exception("Horaire obligatoire.");
+    if (!preg_match('/^(\d{1,2})h?(\d{2})?-(\d{1,2})h?(\d{2})?$/i', $label, $m)) {
+        throw new Exception("Format horaire invalide : " . $label);
     }
+
+    $sh = (int)$m[1];
+    $sm = isset($m[2]) && $m[2] !== "" ? (int)$m[2] : 0;
+    $eh = (int)$m[3];
+    $em = isset($m[4]) && $m[4] !== "" ? (int)$m[4] : 0;
+
+    if ($sh > 23 || $eh > 23 || $sm > 59 || $em > 59) {
+        throw new Exception("Horaire invalide : " . $label);
+    }
+
+    $start = ($sh * 60) + $sm;
+    $end = ($eh * 60) + $em;
+
+    if ($end <= $start) {
+        throw new Exception("L’heure de fin doit être supérieure à l’heure de début.");
+    }
+
+    return [
+        "start" => $start,
+        "end" => $end,
+        "label" => sprintf("%02dh%02d-%02dh%02d", $sh, $sm, $eh, $em)
+    ];
+}
+
+function horaires_overlap($startA, $endA, $startB, $endB) {
+    return $startA < $endB && $endA > $startB;
+}
+
+function find_or_create_horaire($pdo, $label) {
+    $parsed = parse_horaire_minutes($label);
+    $label = $parsed["label"];
 
     $stmt = $pdo->prepare("SELECT id, label FROM horaires WHERE label = :label LIMIT 1");
     $stmt->execute([":label" => $label]);
@@ -217,6 +248,83 @@ function find_enseignant_id($pdo, $teacherName) {
     return (int)$row["id"];
 }
 
+function get_existing_creneaux_for_day($pdo, $jour) {
+    $stmt = $pdo->prepare("
+        SELECT
+            c.id,
+            c.classe_id,
+            cl.nom AS classe,
+            c.enseignant_id,
+            CONCAT(e.nom, ' ', e.prenom) AS enseignant,
+            c.salle_id,
+            s.nom AS salle,
+            c.jour,
+            c.horaire_id,
+            h.label AS horaire,
+            m.nom AS matiere
+        FROM creneaux c
+        JOIN classes cl ON cl.id = c.classe_id
+        JOIN enseignants e ON e.id = c.enseignant_id
+        JOIN salles s ON s.id = c.salle_id
+        JOIN horaires h ON h.id = c.horaire_id
+        JOIN matieres m ON m.id = c.matiere_id
+        WHERE c.jour = :jour
+    ");
+
+    $stmt->execute([":jour" => $jour]);
+
+    return $stmt->fetchAll();
+}
+
+function check_conflicts($pdo, $classeId, $enseignantId, $salleId, $jour, $newHoraireLabel) {
+    $new = parse_horaire_minutes($newHoraireLabel);
+    $existingCreneaux = get_existing_creneaux_for_day($pdo, $jour);
+
+    foreach ($existingCreneaux as $existing) {
+        $old = parse_horaire_minutes($existing["horaire"]);
+
+        $overlap = horaires_overlap(
+            $new["start"],
+            $new["end"],
+            $old["start"],
+            $old["end"]
+        );
+
+        if (!$overlap) {
+            continue;
+        }
+
+        if ((int)$existing["classe_id"] === (int)$classeId) {
+            return [
+                "type" => "classe",
+                "message" => "Conflit de classe : cette classe a déjà un cours qui chevauche cet horaire.",
+                "new_horaire" => $new["label"],
+                "existing" => $existing
+            ];
+        }
+
+        if ((int)$existing["enseignant_id"] === (int)$enseignantId) {
+            return [
+                "type" => "enseignant",
+                "message" => "Conflit professeur : ce professeur a déjà un cours qui chevauche cet horaire.",
+                "new_horaire" => $new["label"],
+                "existing" => $existing
+            ];
+        }
+
+        if ((int)$existing["salle_id"] === (int)$salleId) {
+            return [
+                "type" => "salle",
+                "message" => "Conflit de salle : cette salle est déjà occupée sur un horaire qui chevauche.",
+                "new_horaire" => $new["label"],
+                "existing" => $existing
+            ];
+        }
+    }
+
+    return null;
+}
+
 function list_schedule($pdo) {
     $seances = $pdo->query("
         SELECT
@@ -336,40 +444,20 @@ function create_schedule($pdo) {
         $horaireData = find_or_create_horaire($pdo, $horaire);
         $horaireId = $horaireData["id"];
 
-        $check = $pdo->prepare("
-            SELECT 
-                c.id,
-                cl.nom AS classe,
-                m.nom AS matiere,
-                CONCAT(e.nom, ' ', e.prenom) AS enseignant,
-                s.nom AS salle,
-                h.label AS horaire,
-                c.jour
-            FROM creneaux c
-            JOIN classes cl ON cl.id = c.classe_id
-            JOIN matieres m ON m.id = c.matiere_id
-            JOIN enseignants e ON e.id = c.enseignant_id
-            JOIN salles s ON s.id = c.salle_id
-            JOIN horaires h ON h.id = c.horaire_id
-            WHERE c.classe_id = :classe_id
-            AND c.jour = :jour
-            AND c.horaire_id = :horaire_id
-            LIMIT 1
-        ");
+        $conflict = check_conflicts(
+            $pdo,
+            $classeId,
+            $enseignantId,
+            $salleId,
+            $jour,
+            $horaireData["label"]
+        );
 
-        $check->execute([
-            ":classe_id" => $classeId,
-            ":jour" => $jour,
-            ":horaire_id" => $horaireId
-        ]);
-
-        $existing = $check->fetch();
-
-        if ($existing) {
+        if ($conflict) {
             $pdo->rollBack();
 
-            json_response(false, "Cette classe a déjà un cours sur ce jour et cet horaire.", [
-                "existing" => $existing
+            json_response(false, $conflict["message"], [
+                "conflict" => $conflict
             ], 409);
         }
 
