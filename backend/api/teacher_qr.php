@@ -89,6 +89,140 @@ function ensure_tables($pdo) {
     ");
 }
 
+function is_private_lan_ip($ip) {
+    if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+        return false;
+    }
+
+    if ($ip === "127.0.0.1" || strpos($ip, "169.254.") === 0) {
+        return false;
+    }
+
+    if (strpos($ip, "10.") === 0) {
+        return true;
+    }
+
+    if (strpos($ip, "192.168.") === 0) {
+        return true;
+    }
+
+    if (preg_match('/^172\.(1[6-9]|2[0-9]|3[0-1])\./', $ip)) {
+        return true;
+    }
+
+    return false;
+}
+
+function ip_score($ip) {
+    $score = 0;
+
+    if (strpos($ip, "192.168.") === 0) {
+        $score += 50;
+    }
+
+    if (strpos($ip, "10.") === 0) {
+        $score += 35;
+    }
+
+    if (preg_match('/^172\.(1[6-9]|2[0-9]|3[0-1])\./', $ip)) {
+        $score += 30;
+    }
+
+    // On pénalise les réseaux virtuels souvent utilisés par VirtualBox / VMware / VPN.
+    if (
+        strpos($ip, "192.168.56.") === 0 ||
+        strpos($ip, "192.168.8.") === 0 ||
+        strpos($ip, "192.168.80.") === 0
+    ) {
+        $score -= 40;
+    }
+
+    // Ton réseau Wi-Fi récent était en 192.168.11.x, on le priorise si présent.
+    if (strpos($ip, "192.168.11.") === 0) {
+        $score += 50;
+    }
+
+    return $score;
+}
+
+function get_lan_ip_candidates() {
+    $ips = [];
+
+    $serverCandidates = [
+        $_SERVER["LOCAL_ADDR"] ?? "",
+        $_SERVER["SERVER_ADDR"] ?? "",
+        $_SERVER["HTTP_HOST"] ?? ""
+    ];
+
+    foreach ($serverCandidates as $candidate) {
+        $candidate = trim((string)$candidate);
+        $candidate = preg_replace('/:\d+$/', '', $candidate);
+
+        if (is_private_lan_ip($candidate)) {
+            $ips[] = $candidate;
+        }
+    }
+
+    if (function_exists("shell_exec")) {
+        $output = @shell_exec("ipconfig 2>NUL");
+
+        if ($output) {
+            preg_match_all('/(?:IPv4[^:\r\n]*|Adresse IPv4[^:\r\n]*)[^\r\n:]*:\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3})/iu', $output, $matches);
+
+            if (!empty($matches[1])) {
+                foreach ($matches[1] as $ip) {
+                    if (is_private_lan_ip($ip)) {
+                        $ips[] = $ip;
+                    }
+                }
+            }
+        }
+    }
+
+    $ips = array_values(array_unique($ips));
+
+    usort($ips, function ($a, $b) {
+        return ip_score($b) <=> ip_score($a);
+    });
+
+    return $ips;
+}
+
+function get_network_info() {
+    $candidates = get_lan_ip_candidates();
+    $ip = $candidates[0] ?? null;
+
+    if (!$ip) {
+        $host = $_SERVER["HTTP_HOST"] ?? "127.0.0.1";
+        $host = preg_replace('/:\d+$/', '', $host);
+
+        if ($host === "localhost") {
+            $host = "127.0.0.1";
+        }
+
+        $ip = $host;
+    }
+
+    $scheme = "http";
+    $port = $_SERVER["SERVER_PORT"] ?? "80";
+    $portPart = ($port && $port !== "80") ? ":" . $port : "";
+
+    $scriptPath = $_SERVER["SCRIPT_NAME"] ?? "/EduSchedule-Pro/backend/api/teacher_qr.php";
+
+    $mobileUrl = $scheme . "://" . $ip . $portPart . $scriptPath;
+
+    return [
+        "ip" => $ip,
+        "mobile_url" => $mobileUrl,
+        "candidates" => $candidates,
+        "note" => "Utilise cette URL sur un téléphone connecté au même Wi-Fi que le PC."
+    ];
+}
+
+function network_action() {
+    json_response(true, "Adresse réseau détectée.", get_network_info());
+}
+
 function get_creneau($pdo, $id) {
     $stmt = $pdo->prepare("
         SELECT
@@ -260,6 +394,23 @@ function list_data($pdo) {
             m.nom
     ")->fetchAll();
 
+    $classes = $pdo->query("
+        SELECT id, nom
+        FROM classes
+        ORDER BY nom
+    ")->fetchAll();
+
+    $enseignants = $pdo->query("
+        SELECT
+            id,
+            nom,
+            prenom,
+            email,
+            CONCAT(nom, ' ', prenom) AS nom_complet
+        FROM enseignants
+        ORDER BY nom, prenom
+    ")->fetchAll();
+
     $presences = $pdo->query("
         SELECT
             p.id,
@@ -272,6 +423,7 @@ function list_data($pdo) {
             cl.nom AS classe,
             m.nom AS matiere,
             CONCAT(e.nom, ' ', e.prenom) AS enseignant,
+            e.email AS enseignant_email,
             s.nom AS salle,
             h.label AS horaire,
             c.jour
@@ -283,7 +435,7 @@ function list_data($pdo) {
         JOIN salles s ON s.id = c.salle_id
         JOIN horaires h ON h.id = c.horaire_id
         ORDER BY p.scanned_at DESC
-        LIMIT 200
+        LIMIT 300
     ")->fetchAll();
 
     $tokens = $pdo->query("
@@ -309,13 +461,16 @@ function list_data($pdo) {
         JOIN salles s ON s.id = c.salle_id
         JOIN horaires h ON h.id = c.horaire_id
         ORDER BY t.created_at DESC
-        LIMIT 100
+        LIMIT 150
     ")->fetchAll();
 
     json_response(true, "OK", [
         "creneaux" => $creneaux,
+        "classes" => $classes,
+        "enseignants" => $enseignants,
         "presences" => $presences,
-        "tokens" => $tokens
+        "tokens" => $tokens,
+        "network" => get_network_info()
     ]);
 }
 
@@ -326,16 +481,21 @@ function generate_qr($pdo) {
 
     $creneauId = (int)($data["creneau_id"] ?? 0);
     $dateCours = trim((string)($data["date_cours"] ?? ""));
-    $minutesValid = (int)($data["minutes_valid"] ?? 180);
+    $minutesValid = (int)($data["minutes_valid"] ?? 240);
     $scanBaseUrl = trim((string)($data["scan_base_url"] ?? ""));
     $createdBy = trim((string)($data["created_by"] ?? ""));
+
+    if ($scanBaseUrl === "") {
+        $network = get_network_info();
+        $scanBaseUrl = $network["mobile_url"];
+    }
 
     if ($creneauId <= 0 || $dateCours === "" || $scanBaseUrl === "") {
         json_response(false, "Cours, date et URL mobile obligatoires.", null, 400);
     }
 
     if ($minutesValid <= 0) {
-        $minutesValid = 180;
+        $minutesValid = 240;
     }
 
     $creneau = get_creneau($pdo, $creneauId);
@@ -366,7 +526,6 @@ function generate_qr($pdo) {
     ]);
 
     $scanBaseUrl = rtrim($scanBaseUrl, "?&");
-
     $separator = strpos($scanBaseUrl, "?") === false ? "?" : "&";
     $scanUrl = $scanBaseUrl . $separator . "action=scan&token=" . urlencode($token);
 
@@ -551,9 +710,7 @@ function render_scan_page($data) {
   <meta name='viewport' content='width=device-width, initial-scale=1.0'>
   <title>Pointage professeur</title>
   <style>
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
     body {
       margin: 0;
@@ -668,6 +825,10 @@ $pdo = db();
 $action = $_GET["action"] ?? "list";
 
 try {
+    if ($action === "network") {
+        network_action();
+    }
+
     if ($action === "list") {
         list_data($pdo);
     }
