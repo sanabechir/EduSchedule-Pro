@@ -14,6 +14,17 @@ import {
   buildTableHtml,
   exportHtmlToPdf,
 } from '../services/pdfExport'
+import {
+  canEditCahierTexte,
+  canExportCahierPdf,
+  canFillCahierTexte,
+  canSignCahierAsDelegue,
+  canSignCahierAsTeacher,
+  canValidateCahierTexte,
+  canViewAllCahiers,
+  canViewCahierTexte,
+  getRoleLabel,
+} from '../services/permissions'
 
 const EMPTY_FORM = {
   titre: '',
@@ -26,9 +37,17 @@ function CahierTextePage({ user }) {
   const { store, actions } = useAppStore()
 
   const role = user?.role || 'admin'
-  const permissions = getPermissions(role)
   const teacherName = getTeacherNameFromUser(user)
   const delegateClass = getClassNameFromUser(user)
+
+  const canViewPage = canViewCahierTexte(user)
+  const canViewAll = canViewAllCahiers(user)
+  const canFill = canFillCahierTexte(user)
+  const canEditRole = canEditCahierTexte(user)
+  const canSignDelegueRole = canSignCahierAsDelegue(user)
+  const canSignTeacherRole = canSignCahierAsTeacher(user)
+  const canValidate = canValidateCahierTexte(user)
+  const canExportPdf = canExportCahierPdf(user)
 
   const [selectedWeek, setSelectedWeek] = useState(DEFAULT_WEEK_KEY)
   const [selectedClasse, setSelectedClasse] = useState(
@@ -48,8 +67,26 @@ function CahierTextePage({ user }) {
       ]),
     ]
 
-    return ['Toutes', ...unique]
-  }, [store.seances])
+    if (role === 'delegue' && delegateClass) {
+      return [delegateClass]
+    }
+
+    if (role === 'enseignant' && teacherName) {
+      const teacherClasses = uniqueValues(
+        (store.seances || [])
+          .filter((item) => item.enseignant === teacherName)
+          .map((item) => item.classe),
+      )
+
+      return ['Toutes', ...teacherClasses]
+    }
+
+    if (canViewAll) {
+      return ['Toutes', ...unique]
+    }
+
+    return ['Toutes']
+  }, [store.seances, role, delegateClass, teacherName, canViewAll])
 
   const seances = useMemo(() => {
     return (store.seances || [])
@@ -65,13 +102,6 @@ function CahierTextePage({ user }) {
       .filter((item) =>
         role === 'delegue' && delegateClass ? item.classe === delegateClass : true,
       )
-      .filter((item) => {
-        if (role !== 'comptable') return true
-
-        return (store.cahiers || []).some(
-          (cahier) => cahier.seanceId === item.id && cahier.locked,
-        )
-      })
       .sort((a, b) => {
         const dayA = week.days.findIndex((day) => day.key === a.jour)
         const dayB = week.days.findIndex((day) => day.key === b.jour)
@@ -82,7 +112,6 @@ function CahierTextePage({ user }) {
       })
   }, [
     store.seances,
-    store.cahiers,
     selectedWeek,
     selectedClasse,
     week.days,
@@ -145,26 +174,29 @@ function CahierTextePage({ user }) {
       renseignes: cahiersForFilter.length,
       signesDelegue: cahiersForFilter.filter((item) => item.signatureDelegue)
         .length,
+      signesEnseignant: cahiersForFilter.filter((item) => item.signatureEnseignant)
+        .length,
       clotures: cahiersForFilter.filter((item) => item.locked).length,
     }
   }, [seances, store.cahiers])
 
   const canEdit =
     selectedSeance &&
-    permissions.canFill &&
+    canFill &&
+    canEditRole &&
     (!cahier || !cahier.locked)
 
   const canSignDelegue =
     selectedSeance &&
     cahier &&
-    permissions.canSignDelegue &&
+    canSignDelegueRole &&
     !cahier.signatureDelegue &&
     !cahier.locked
 
   const canSignTeacher =
     selectedSeance &&
     cahier &&
-    permissions.canSignTeacher &&
+    canSignTeacherRole &&
     cahier.signatureDelegue &&
     !cahier.signatureEnseignant &&
     !cahier.locked
@@ -175,8 +207,8 @@ function CahierTextePage({ user }) {
       return
     }
 
-    if (!permissions.canFill) {
-      setMessage('Vous n’avez pas le droit de remplir le cahier de texte.')
+    if (!canFill || !canEditRole) {
+      setMessage('Votre rôle ne permet pas de remplir ce cahier de texte.')
       return
     }
 
@@ -208,6 +240,11 @@ function CahierTextePage({ user }) {
   const signDelegue = (signatureImage) => {
     if (!selectedSeance || !cahier) {
       setMessage('Le cahier doit d’abord être rempli avant signature.')
+      return
+    }
+
+    if (!canSignDelegueRole) {
+      setMessage('Votre rôle ne permet pas de signer comme délégué.')
       return
     }
 
@@ -243,6 +280,11 @@ function CahierTextePage({ user }) {
   const signTeacher = (signatureImage) => {
     if (!selectedSeance || !cahier) {
       setMessage('Le cahier doit d’abord être rempli.')
+      return
+    }
+
+    if (!canSignTeacherRole) {
+      setMessage('Votre rôle ne permet pas de signer comme enseignant.')
       return
     }
 
@@ -285,6 +327,11 @@ function CahierTextePage({ user }) {
   }
 
   const exportCahierPdf = () => {
+    if (!canExportPdf) {
+      setMessage('Votre rôle ne permet pas d’exporter ce cahier.')
+      return
+    }
+
     if (!selectedSeance || !cahier) {
       setMessage('Aucun cahier à exporter.')
       return
@@ -371,14 +418,32 @@ function CahierTextePage({ user }) {
     setMessage('PDF du cahier de texte généré.')
   }
 
+  if (!canViewPage) {
+    return (
+      <div className="page cahier-page">
+        <div className="page-heading">
+          <div>
+            <h1>Accès non autorisé</h1>
+            <p>
+              Votre rôle actuel ({getRoleLabel(user)}) ne permet pas de consulter
+              le cahier de texte.
+            </p>
+          </div>
+        </div>
+
+        <section className="panel cahier-empty-state">
+          Cette page n’est pas disponible pour votre profil.
+        </section>
+      </div>
+    )
+  }
+
   return (
     <div className="page cahier-page">
       <div className="page-heading">
         <div>
-          <h1>Cahier de texte</h1>
-          <p>
-            Suivi du contenu pédagogique, signatures et clôture des séances.
-          </p>
+          <h1>{getPageTitle(role)}</h1>
+          <p>{getPageDescription(role)}</p>
         </div>
 
         {selectedSeance && canEdit && (
@@ -389,7 +454,7 @@ function CahierTextePage({ user }) {
       </div>
 
       <div className="cahier-role-note">
-        <strong>{getRoleLabel(role)}</strong>
+        <strong>{getRoleLabel(user)}</strong>
         <span>{getRoleDescription(role)}</span>
       </div>
 
@@ -423,7 +488,7 @@ function CahierTextePage({ user }) {
           <label>Classe</label>
           <select
             value={selectedClasse}
-            disabled={role === 'delegue'}
+            disabled={role === 'delegue' || !canViewAll}
             onChange={(e) => {
               setSelectedClasse(e.target.value)
               setSelectedSeanceId(null)
@@ -437,6 +502,13 @@ function CahierTextePage({ user }) {
             ))}
           </select>
         </div>
+
+        {canValidate && (
+          <div className="cahier-control-note">
+            Contrôle autorisé : vous pouvez suivre les cahiers renseignés,
+            signés ou clôturés.
+          </div>
+        )}
       </div>
 
       {message && <div className="cahier-message">{message}</div>}
@@ -630,15 +702,15 @@ function CahierTextePage({ user }) {
                   </button>
                 )}
 
-                {cahier && (
+                {cahier && canExportPdf && (
                   <button className="isge-secondary-btn" onClick={exportCahierPdf}>
                     Exporter PDF
                   </button>
                 )}
 
-                {!permissions.canFill &&
-                  !permissions.canSignDelegue &&
-                  !permissions.canSignTeacher && (
+                {!canFill &&
+                  !canSignDelegueRole &&
+                  !canSignTeacherRole && (
                     <div className="cahier-readonly">
                       Consultation uniquement pour ce rôle.
                     </div>
@@ -832,62 +904,42 @@ function PointageStatus({ pointage }) {
   )
 }
 
-function getPermissions(role) {
-  if (role === 'delegue') {
-    return {
-      canFill: true,
-      canSignDelegue: true,
-      canSignTeacher: false,
-    }
-  }
+function getPageTitle(role) {
+  if (role === 'enseignant') return 'Mes cahiers'
+  if (role === 'delegue') return 'Cahiers de ma classe'
+  if (role === 'surveillant') return 'Cahiers à contrôler'
 
-  if (role === 'enseignant') {
-    return {
-      canFill: false,
-      canSignDelegue: false,
-      canSignTeacher: true,
-    }
-  }
-
-  if (role === 'admin') {
-    return {
-      canFill: true,
-      canSignDelegue: true,
-      canSignTeacher: true,
-    }
-  }
-
-  return {
-    canFill: false,
-    canSignDelegue: false,
-    canSignTeacher: false,
-  }
+  return 'Cahier de texte'
 }
 
-function getRoleLabel(role) {
-  const labels = {
-    admin: 'Administrateur',
-    enseignant: 'Enseignant',
-    delegue: 'Délégué',
-    surveillant: 'Surveillant',
-    comptable: 'Comptable',
+function getPageDescription(role) {
+  if (role === 'enseignant') {
+    return 'Remplissez vos séances, vérifiez les signatures et clôturez vos cahiers.'
   }
 
-  return labels[role] || 'Utilisateur'
+  if (role === 'delegue') {
+    return 'Consultez les cahiers de votre classe et signez côté classe.'
+  }
+
+  if (role === 'surveillant') {
+    return 'Contrôlez les cahiers renseignés, signés ou en attente.'
+  }
+
+  return 'Suivi du contenu pédagogique, signatures et clôture des séances.'
 }
 
 function getRoleDescription(role) {
   const descriptions = {
     admin:
-      'Vous pouvez remplir, corriger, signer et consulter tous les cahiers.',
+      'Vous pouvez remplir, corriger, consulter et exporter tous les cahiers.',
     delegue:
-      'Vous voyez votre classe, vous remplissez le cahier et vous signez côté classe.',
+      'Vous voyez uniquement votre classe et vous signez le cahier côté classe.',
     enseignant:
-      'Vous voyez vos cours, vous vérifiez le contenu et vous signez pour clôturer le cahier.',
+      'Vous voyez uniquement vos cours, vous remplissez vos cahiers et vous signez pour clôturer.',
     surveillant:
       'Vous contrôlez les cahiers renseignés, signés ou en attente.',
     comptable:
-      'Vous consultez uniquement les cahiers clôturés utiles aux vacations.',
+      'Ce module n’est normalement pas accessible à la comptabilité.',
   }
 
   return descriptions[role] || 'Accès limité au cahier de texte.'
@@ -934,6 +986,10 @@ function makePdfFilename(value) {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9.]+/g, '-')
     .replace(/-+/g, '-')
+}
+
+function uniqueValues(values) {
+  return [...new Set(values.filter(Boolean))]
 }
 
 export default CahierTextePage

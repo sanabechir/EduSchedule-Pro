@@ -14,6 +14,13 @@ import {
   buildTableHtml,
   exportHtmlToPdf,
 } from '../services/pdfExport'
+import {
+  canExportRapportsPdf,
+  canViewFinancialReports,
+  canViewPresenceReports,
+  canViewRapports,
+  getRoleLabel,
+} from '../services/permissions'
 
 function RapportsPage({ user }) {
   const { store } = useAppStore()
@@ -21,6 +28,11 @@ function RapportsPage({ user }) {
   const role = user?.role || 'admin'
   const teacherName = getTeacherNameFromUser(user)
   const delegateClass = getClassNameFromUser(user)
+
+  const canViewPage = canViewRapports(user)
+  const canExportPdf = canExportRapportsPdf(user)
+  const canViewPresence = canViewPresenceReports(user)
+  const canViewFinancial = canViewFinancialReports(user)
 
   const seancesData = store.seances || []
   const pointagesData = store.pointages || []
@@ -47,16 +59,24 @@ function RapportsPage({ user }) {
       ]),
     ]
 
+    if (role === 'delegue' && delegateClass) {
+      return [delegateClass]
+    }
+
     return ['Toutes', ...unique]
-  }, [seancesData])
+  }, [seancesData, role, delegateClass])
 
   const teachers = useMemo(() => {
     const unique = [
       ...new Set(seancesData.map((item) => item.enseignant).filter(Boolean)),
     ]
 
+    if (role === 'enseignant' && teacherName) {
+      return [teacherName]
+    }
+
     return ['Tous', ...unique]
-  }, [seancesData])
+  }, [seancesData, role, teacherName])
 
   const scopedSeances = useMemo(() => {
     return seancesData
@@ -123,6 +143,8 @@ function RapportsPage({ user }) {
   }, [cahiersData, scopedSeances])
 
   const scopedVacations = useMemo(() => {
+    if (!canViewFinancial) return []
+
     return vacationsData
       .map((vacation) => {
         const seance = seancesData.find((item) => item.id === vacation.seanceId)
@@ -163,6 +185,7 @@ function RapportsPage({ user }) {
     selectedTeacher,
     role,
     teacherName,
+    canViewFinancial,
   ])
 
   const stats = useMemo(() => {
@@ -294,6 +317,11 @@ function RapportsPage({ user }) {
   }, [scopedSeances, scopedPointages, scopedCahiers, scopedVacations, role])
 
   const exportPresencePdf = () => {
+    if (!canExportPdf || !canViewPresence) {
+      setMessage('Votre rôle ne permet pas d’exporter les rapports de présence.')
+      return
+    }
+
     const rows = scopedSeances.map((seance) => {
       const pointage = scopedPointages.find(
         (item) => item.seanceId === seance.id,
@@ -350,6 +378,11 @@ function RapportsPage({ user }) {
   }
 
   const exportCahiersPdf = () => {
+    if (!canExportPdf || !canViewPresence) {
+      setMessage('Votre rôle ne permet pas d’exporter les rapports de cahiers.')
+      return
+    }
+
     const rows = scopedCahiers.map((cahier) => [
       cahier.seance?.classe || '',
       cahier.seance?.matiere || '',
@@ -400,6 +433,11 @@ function RapportsPage({ user }) {
   }
 
   const exportVacationsPdf = () => {
+    if (!canExportPdf || !canViewFinancial) {
+      setMessage('Votre rôle ne permet pas d’exporter les rapports financiers.')
+      return
+    }
+
     const rows = scopedVacations.map((vacation) => [
       vacation.enseignant,
       vacation.seance?.classe || '',
@@ -454,36 +492,63 @@ function RapportsPage({ user }) {
   }
 
   const exportSummaryPdf = () => {
+    if (!canExportPdf) {
+      setMessage('Votre rôle ne permet pas d’exporter les rapports.')
+      return
+    }
+
+    const cards = canViewFinancial
+      ? [
+          { label: 'Séances', value: stats.totalSeances },
+          { label: 'Réalisées', value: stats.realisees },
+          { label: 'Pointages', value: stats.pointages },
+          { label: 'Cahiers clôturés', value: stats.cahiersClotures },
+          { label: 'Vacations', value: stats.vacations },
+          { label: 'Montant net', value: formatMoney(stats.montantNet) },
+        ]
+      : [
+          { label: 'Séances', value: stats.totalSeances },
+          { label: 'Réalisées', value: stats.realisees },
+          { label: 'Pointages', value: stats.pointages },
+          { label: 'Cahiers clôturés', value: stats.cahiersClotures },
+          { label: 'Présences', value: stats.presents },
+          { label: 'Retards', value: stats.retards },
+        ]
+
+    const rows = canViewFinancial
+      ? [
+          ['Séances planifiées', stats.totalSeances],
+          ['Séances réalisées', stats.realisees],
+          ['Taux de réalisation', `${stats.tauxRealisation}%`],
+          ['Pointages', stats.pointages],
+          ['Présences', stats.presents],
+          ['Retards', stats.retards],
+          ['Absences', stats.absents],
+          ['Cahiers renseignés', stats.cahiers],
+          ['Cahiers clôturés', stats.cahiersClotures],
+          ['Fiches de vacation', stats.vacations],
+          ['Vacations validées', stats.vacationsValidees],
+          ['Vacations payées', stats.vacationsPayees],
+          ['Montant net vacations', formatMoney(stats.montantNet)],
+        ]
+      : [
+          ['Séances planifiées', stats.totalSeances],
+          ['Séances réalisées', stats.realisees],
+          ['Taux de réalisation', `${stats.tauxRealisation}%`],
+          ['Pointages', stats.pointages],
+          ['Présences', stats.presents],
+          ['Retards', stats.retards],
+          ['Absences', stats.absents],
+          ['Cahiers renseignés', stats.cahiers],
+          ['Cahiers clôturés', stats.cahiersClotures],
+        ]
+
     const contentHtml = `
-      ${buildCardsHtml([
-        { label: 'Séances', value: stats.totalSeances },
-        { label: 'Réalisées', value: stats.realisees },
-        { label: 'Pointages', value: stats.pointages },
-        { label: 'Cahiers clôturés', value: stats.cahiersClotures },
-        { label: 'Vacations', value: stats.vacations },
-        { label: 'Montant net', value: formatMoney(stats.montantNet) },
-      ])}
+      ${buildCardsHtml(cards)}
 
       <div class="pdf-section">
         <h2>Synthèse générale</h2>
-        ${buildTableHtml(
-          ['Indicateur', 'Valeur'],
-          [
-            ['Séances planifiées', stats.totalSeances],
-            ['Séances réalisées', stats.realisees],
-            ['Taux de réalisation', `${stats.tauxRealisation}%`],
-            ['Pointages', stats.pointages],
-            ['Présences', stats.presents],
-            ['Retards', stats.retards],
-            ['Absences', stats.absents],
-            ['Cahiers renseignés', stats.cahiers],
-            ['Cahiers clôturés', stats.cahiersClotures],
-            ['Fiches de vacation', stats.vacations],
-            ['Vacations validées', stats.vacationsValidees],
-            ['Vacations payées', stats.vacationsPayees],
-            ['Montant net vacations', formatMoney(stats.montantNet)],
-          ],
-        )}
+        ${buildTableHtml(['Indicateur', 'Valeur'], rows)}
       </div>
     `
 
@@ -499,22 +564,41 @@ function RapportsPage({ user }) {
 
   const roleConfig = getRoleConfig(role)
 
+  if (!canViewPage) {
+    return (
+      <div className="page">
+        <div className="placeholder">
+          <div>
+            <div className="placeholder-icon">RP</div>
+            <h1>Accès non autorisé</h1>
+            <p>
+              Votre rôle actuel ({getRoleLabel(user)}) ne permet pas d’accéder
+              aux rapports globaux.
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="page rapports-page">
       <div className="page-heading">
         <div>
-          <h1>Rapports & Statistiques</h1>
+          <h1>{getPageTitle(role)}</h1>
           <p>{roleConfig.description}</p>
         </div>
 
-        <button className="primary-btn" onClick={exportSummaryPdf}>
-          Exporter PDF
-        </button>
+        {canExportPdf && (
+          <button className="primary-btn" onClick={exportSummaryPdf}>
+            Exporter PDF
+          </button>
+        )}
       </div>
 
       <div className="rapport-scope-note">
         <div>
-          <strong>{getRoleLabel(role)}</strong>
+          <strong>{getRoleLabel(user)}</strong>
           <span>{roleConfig.scope}</span>
         </div>
 
@@ -590,195 +674,252 @@ function RapportsPage({ user }) {
         ))}
       </div>
 
-      <div className="rapport-grid">
-        <section className="panel rapport-chart-panel">
-          <div className="panel-header">
-            <h3>Indicateurs de la semaine</h3>
-            <span className="rapport-badge">Données dynamiques</span>
-          </div>
+      {canViewPresence && (
+        <div className="rapport-grid">
+          <section className="panel rapport-chart-panel">
+            <div className="panel-header">
+              <h3>Indicateurs de la semaine</h3>
+              <span className="rapport-badge">Données dynamiques</span>
+            </div>
 
-          <div className="rapport-chart">
-            {chartData.map((item) => (
-              <div key={item.label} className="rapport-chart-item">
-                <div className="rapport-chart-bars">
-                  <span
-                    className="bar seances"
-                    style={{
-                      height: `${Math.max(10, item.seances * 18)}px`,
-                    }}
-                  />
-                  <span
-                    className="bar pointages"
-                    style={{
-                      height: `${Math.max(10, item.pointages * 18)}px`,
-                    }}
-                  />
-                  <span
-                    className="bar cahiers"
-                    style={{
-                      height: `${Math.max(10, item.cahiers * 18)}px`,
-                    }}
-                  />
+            <div className="rapport-chart">
+              {chartData.map((item) => (
+                <div key={item.label} className="rapport-chart-item">
+                  <div className="rapport-chart-bars">
+                    <span
+                      className="bar seances"
+                      style={{
+                        height: `${Math.max(10, item.seances * 18)}px`,
+                      }}
+                    />
+                    <span
+                      className="bar pointages"
+                      style={{
+                        height: `${Math.max(10, item.pointages * 18)}px`,
+                      }}
+                    />
+                    <span
+                      className="bar cahiers"
+                      style={{
+                        height: `${Math.max(10, item.cahiers * 18)}px`,
+                      }}
+                    />
+                  </div>
+
+                  <strong>{item.label}</strong>
                 </div>
+              ))}
+            </div>
 
-                <strong>{item.label}</strong>
-              </div>
-            ))}
-          </div>
+            <div className="rapport-legend">
+              <span>
+                <i className="seances" /> Séances
+              </span>
+              <span>
+                <i className="pointages" /> Pointages
+              </span>
+              <span>
+                <i className="cahiers" /> Cahiers
+              </span>
+            </div>
+          </section>
 
-          <div className="rapport-legend">
-            <span>
-              <i className="seances" /> Séances
-            </span>
-            <span>
-              <i className="pointages" /> Pointages
-            </span>
-            <span>
-              <i className="cahiers" /> Cahiers
-            </span>
-          </div>
-        </section>
+          <section className="panel rapport-export-panel">
+            <div className="panel-header">
+              <h3>Exports PDF disponibles</h3>
+              {canExportPdf && <button onClick={exportSummaryPdf}>Synthèse</button>}
+            </div>
 
-        <section className="panel rapport-export-panel">
-          <div className="panel-header">
-            <h3>Exports PDF disponibles</h3>
-            <button onClick={exportSummaryPdf}>Synthèse</button>
-          </div>
+            <div className="rapport-export-list">
+              <ExportItem
+                code="QR"
+                title="Rapport de présence"
+                text="PDF des pointages, retards et absences"
+                onClick={exportPresencePdf}
+              />
 
-          <div className="rapport-export-list">
-            <ExportItem
-              code="QR"
-              title="Rapport de présence"
-              text="PDF des pointages, retards et absences"
-              onClick={exportPresencePdf}
-            />
+              <ExportItem
+                code="CT"
+                title="Rapport cahiers"
+                text="PDF des cahiers et signatures"
+                onClick={exportCahiersPdf}
+              />
 
-            <ExportItem
-              code="CT"
-              title="Rapport cahiers"
-              text="PDF des cahiers et signatures"
-              onClick={exportCahiersPdf}
-            />
+              {canViewFinancial && (
+                <ExportItem
+                  code="FV"
+                  title="Rapport vacations"
+                  text="PDF des montants et paiements"
+                  onClick={exportVacationsPdf}
+                />
+              )}
 
-            {role !== 'delegue' && (
+              <ExportItem
+                code="SY"
+                title="Synthèse globale"
+                text="PDF des indicateurs principaux"
+                onClick={exportSummaryPdf}
+              />
+            </div>
+          </section>
+        </div>
+      )}
+
+      {role === 'comptable' && canViewFinancial && (
+        <div className="rapport-grid">
+          <section className="panel rapport-export-panel">
+            <div className="panel-header">
+              <h3>Rapports financiers</h3>
+              {canExportPdf && <button onClick={exportVacationsPdf}>Vacations</button>}
+            </div>
+
+            <div className="rapport-export-list">
               <ExportItem
                 code="FV"
                 title="Rapport vacations"
-                text="PDF des montants et paiements"
+                text="PDF des fiches, validations, montants et paiements"
                 onClick={exportVacationsPdf}
               />
-            )}
 
-            <ExportItem
-              code="SY"
-              title="Synthèse globale"
-              text="PDF des indicateurs principaux"
-              onClick={exportSummaryPdf}
-            />
-          </div>
-        </section>
-      </div>
+              <ExportItem
+                code="SY"
+                title="Synthèse financière"
+                text="PDF des indicateurs financiers principaux"
+                onClick={exportSummaryPdf}
+              />
+            </div>
+          </section>
 
-      <div className="rapport-grid bottom">
-        <section className="panel rapport-table-panel">
-          <div className="panel-header">
-            <h3>Résumé des séances</h3>
-            <button>{scopedSeances.length} ligne(s)</button>
-          </div>
+          <section className="panel rapport-alert-panel">
+            <div className="panel-header">
+              <h3>Points financiers à surveiller</h3>
+              <button>{alerts.length}</button>
+            </div>
 
-          <div className="rapport-table-wrap">
-            <table className="rapport-table">
-              <thead>
-                <tr>
-                  <th>Classe</th>
-                  <th>Matière</th>
-                  <th>Professeur</th>
-                  <th>Jour</th>
-                  <th>Horaire</th>
-                  <th>Pointage</th>
-                  <th>Cahier</th>
-                </tr>
-              </thead>
+            <div className="rapport-alert-list">
+              {alerts.map((alert) => (
+                <div key={alert.id} className="rapport-alert-item">
+                  <div className="rapport-alert-icon">{alert.type}</div>
 
-              <tbody>
-                {scopedSeances.map((seance) => {
-                  const pointage = scopedPointages.find(
-                    (item) => item.seanceId === seance.id,
-                  )
-
-                  const cahier = scopedCahiers.find(
-                    (item) => item.seanceId === seance.id,
-                  )
-
-                  return (
-                    <tr key={seance.id}>
-                      <td>{seance.classe}</td>
-                      <td>{seance.matiere}</td>
-                      <td>{seance.enseignant}</td>
-                      <td>{seance.jour}</td>
-                      <td>{formatSlot(seance.horaire)}</td>
-                      <td>
-                        <StatusPill
-                          value={
-                            pointage
-                              ? formatPointage(pointage.statut)
-                              : 'Non pointé'
-                          }
-                          type={pointage?.statut || 'neutral'}
-                        />
-                      </td>
-                      <td>
-                        <StatusPill
-                          value={
-                            cahier
-                              ? cahier.locked
-                                ? 'Clôturé'
-                                : 'Ouvert'
-                              : 'Non renseigné'
-                          }
-                          type={cahier?.locked ? 'success' : 'neutral'}
-                        />
-                      </td>
-                    </tr>
-                  )
-                })}
-
-                {scopedSeances.length === 0 && (
-                  <tr>
-                    <td colSpan={7}>Aucune séance pour ces filtres.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="panel rapport-alert-panel">
-          <div className="panel-header">
-            <h3>Points à surveiller</h3>
-            <button>{alerts.length}</button>
-          </div>
-
-          <div className="rapport-alert-list">
-            {alerts.map((alert) => (
-              <div key={alert.id} className="rapport-alert-item">
-                <div className="rapport-alert-icon">{alert.type}</div>
-
-                <div>
-                  <strong>{alert.title}</strong>
-                  <span>{alert.text}</span>
+                  <div>
+                    <strong>{alert.title}</strong>
+                    <span>{alert.text}</span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
 
-            {alerts.length === 0 && (
-              <div className="rapport-empty">
-                Aucun point critique pour ce périmètre.
-              </div>
-            )}
-          </div>
-        </section>
-      </div>
+              {alerts.length === 0 && (
+                <div className="rapport-empty">
+                  Aucun point financier critique pour ce périmètre.
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {canViewPresence && (
+        <div className="rapport-grid bottom">
+          <section className="panel rapport-table-panel">
+            <div className="panel-header">
+              <h3>Résumé des séances</h3>
+              <button>{scopedSeances.length} ligne(s)</button>
+            </div>
+
+            <div className="rapport-table-wrap">
+              <table className="rapport-table">
+                <thead>
+                  <tr>
+                    <th>Classe</th>
+                    <th>Matière</th>
+                    <th>Professeur</th>
+                    <th>Jour</th>
+                    <th>Horaire</th>
+                    <th>Pointage</th>
+                    <th>Cahier</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {scopedSeances.map((seance) => {
+                    const pointage = scopedPointages.find(
+                      (item) => item.seanceId === seance.id,
+                    )
+
+                    const cahier = scopedCahiers.find(
+                      (item) => item.seanceId === seance.id,
+                    )
+
+                    return (
+                      <tr key={seance.id}>
+                        <td>{seance.classe}</td>
+                        <td>{seance.matiere}</td>
+                        <td>{seance.enseignant}</td>
+                        <td>{seance.jour}</td>
+                        <td>{formatSlot(seance.horaire)}</td>
+                        <td>
+                          <StatusPill
+                            value={
+                              pointage
+                                ? formatPointage(pointage.statut)
+                                : 'Non pointé'
+                            }
+                            type={pointage?.statut || 'neutral'}
+                          />
+                        </td>
+                        <td>
+                          <StatusPill
+                            value={
+                              cahier
+                                ? cahier.locked
+                                  ? 'Clôturé'
+                                  : 'Ouvert'
+                                : 'Non renseigné'
+                            }
+                            type={cahier?.locked ? 'success' : 'neutral'}
+                          />
+                        </td>
+                      </tr>
+                    )
+                  })}
+
+                  {scopedSeances.length === 0 && (
+                    <tr>
+                      <td colSpan={7}>Aucune séance pour ces filtres.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="panel rapport-alert-panel">
+            <div className="panel-header">
+              <h3>Points à surveiller</h3>
+              <button>{alerts.length}</button>
+            </div>
+
+            <div className="rapport-alert-list">
+              {alerts.map((alert) => (
+                <div key={alert.id} className="rapport-alert-item">
+                  <div className="rapport-alert-icon">{alert.type}</div>
+
+                  <div>
+                    <strong>{alert.title}</strong>
+                    <span>{alert.text}</span>
+                  </div>
+                </div>
+              ))}
+
+              {alerts.length === 0 && (
+                <div className="rapport-empty">
+                  Aucun point critique pour ce périmètre.
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }
@@ -844,60 +985,31 @@ function getStatCards(role, stats) {
     ]
   }
 
-  if (role === 'enseignant') {
-    return [
-      {
-        label: 'Mes séances',
-        value: stats.totalSeances,
-        code: 'SE',
-        hint: 'Planifiées',
-      },
-      {
-        label: 'Présences',
-        value: stats.presents,
-        code: 'PR',
-        hint: 'Validées',
-      },
-      {
-        label: 'Cahiers',
-        value: stats.cahiersClotures,
-        code: 'CT',
-        hint: 'Clôturés',
-      },
-      {
-        label: 'Vacations',
-        value: stats.vacations,
-        code: 'FV',
-        hint: 'Mes fiches',
-      },
-    ]
-  }
-
-  if (role === 'delegue') {
+  if (role === 'surveillant') {
     return [
       {
         label: 'Séances',
         value: stats.totalSeances,
         code: 'SE',
-        hint: 'Classe',
+        hint: 'Planifiées',
       },
       {
-        label: 'Pointages',
-        value: stats.pointages,
-        code: 'QR',
-        hint: 'Enregistrés',
+        label: 'Réalisées',
+        value: stats.realisees,
+        code: 'SR',
+        hint: `${stats.tauxRealisation}%`,
       },
       {
-        label: 'Cahiers',
-        value: stats.cahiers,
-        code: 'CT',
-        hint: 'Renseignés',
+        label: 'Retards',
+        value: stats.retards,
+        code: 'RT',
+        hint: 'À contrôler',
       },
       {
-        label: 'Clôturés',
-        value: stats.cahiersClotures,
-        code: 'OK',
-        hint: 'Signés',
+        label: 'Absences',
+        value: stats.absents,
+        code: 'AB',
+        hint: 'Signalées',
       },
     ]
   }
@@ -923,16 +1035,18 @@ function getStatCards(role, stats) {
     },
     {
       label: 'Rapports',
-      value: getAvailableReportCount(role),
+      value: 4,
       code: 'RP',
       hint: 'Disponibles',
     },
   ]
 }
 
-function getAvailableReportCount(role) {
-  if (role === 'delegue') return 3
-  return 4
+function getPageTitle(role) {
+  if (role === 'comptable') return 'Rapports financiers'
+  if (role === 'surveillant') return 'Rapports de présence'
+
+  return 'Rapports & Statistiques'
 }
 
 function getRoleConfig(role) {
@@ -941,16 +1055,6 @@ function getRoleConfig(role) {
       description:
         'Analyse dynamique des séances, présences, cahiers et vacations.',
       scope: 'Vue complète de tous les rapports disponibles.',
-    },
-    enseignant: {
-      description:
-        'Analyse dynamique de vos séances, cahiers et fiches de vacation.',
-      scope: 'Rapports filtrés selon le professeur connecté.',
-    },
-    delegue: {
-      description:
-        'Analyse dynamique des séances et cahiers de votre classe.',
-      scope: 'Rapports filtrés selon la classe du délégué.',
     },
     surveillant: {
       description:
@@ -965,18 +1069,6 @@ function getRoleConfig(role) {
   }
 
   return configs[role] || configs.admin
-}
-
-function getRoleLabel(role) {
-  const labels = {
-    admin: 'Administrateur',
-    enseignant: 'Enseignant',
-    delegue: 'Délégué',
-    surveillant: 'Surveillant',
-    comptable: 'Comptable',
-  }
-
-  return labels[role] || 'Utilisateur'
 }
 
 function formatPointage(status) {

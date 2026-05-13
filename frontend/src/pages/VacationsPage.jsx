@@ -13,13 +13,29 @@ import {
   buildTableHtml,
   exportHtmlToPdf,
 } from '../services/pdfExport'
+import {
+  canExportVacationPdf,
+  canGenerateVacations,
+  canMarkVacationPaid,
+  canValidateVacations,
+  canViewAllVacations,
+  canViewVacations,
+  getRoleLabel,
+} from '../services/permissions'
 
 function VacationsPage({ user }) {
   const { store, actions } = useAppStore()
 
   const role = user?.role || 'admin'
   const teacherName = getTeacherNameFromUser(user)
-  const permissions = getPermissions(role)
+
+  const canViewPage = canViewVacations(user)
+  const canViewAll = canViewAllVacations(user)
+  const canGenerate = canGenerateVacations(user)
+  const canValidate = canValidateVacations(user)
+  const canMarkPaid = canMarkVacationPaid(user)
+  const canExportPdf = canExportVacationPdf(user)
+  const canSignOwnVacation = role === 'enseignant'
 
   const [selectedWeek, setSelectedWeek] = useState(DEFAULT_WEEK_KEY)
   const [selectedTeacher, setSelectedTeacher] = useState(
@@ -34,8 +50,12 @@ function VacationsPage({ user }) {
       ...new Set((store.seances || []).map((item) => item.enseignant).filter(Boolean)),
     ]
 
+    if (!canViewAll && role === 'enseignant' && teacherName) {
+      return [teacherName]
+    }
+
     return ['Tous', ...unique]
-  }, [store.seances])
+  }, [store.seances, canViewAll, role, teacherName])
 
   const enrichedVacations = useMemo(() => {
     return (store.vacations || [])
@@ -55,11 +75,15 @@ function VacationsPage({ user }) {
       })
       .filter((vacation) => vacation.seance)
       .filter((vacation) => vacation.seance.weekKey === selectedWeek)
-      .filter((vacation) =>
-        role === 'enseignant' && teacherName
-          ? vacation.enseignant === teacherName
-          : true,
-      )
+      .filter((vacation) => {
+        if (canViewAll) return true
+
+        if (role === 'enseignant' && teacherName) {
+          return vacation.enseignant === teacherName
+        }
+
+        return false
+      })
       .filter((vacation) =>
         selectedTeacher === 'Tous'
           ? true
@@ -75,6 +99,7 @@ function VacationsPage({ user }) {
     selectedWeek,
     selectedTeacher,
     selectedStatus,
+    canViewAll,
     role,
     teacherName,
   ])
@@ -96,12 +121,19 @@ function VacationsPage({ user }) {
       (item) => item.statut === 'en_attente',
     ).length
 
+    const signees = enrichedVacations.filter(
+      (item) => item.statut === 'signee_enseignant',
+    ).length
+
     const visees = enrichedVacations.filter((item) => item.statut === 'visee')
       .length
 
     const validees = enrichedVacations.filter(
       (item) => item.statut === 'validee' || item.statut === 'payee',
     ).length
+
+    const payees = enrichedVacations.filter((item) => item.statut === 'payee')
+      .length
 
     const montant = enrichedVacations.reduce(
       (sum, item) => sum + Number(item.montantNet || 0),
@@ -111,8 +143,10 @@ function VacationsPage({ user }) {
     return {
       total,
       enAttente,
+      signees,
       visees,
       validees,
+      payees,
       montant,
     }
   }, [enrichedVacations])
@@ -137,23 +171,28 @@ function VacationsPage({ user }) {
       })
       .filter((item) => item.seance && !item.vacation)
       .filter((item) => item.seance.weekKey === selectedWeek)
-      .filter((item) =>
-        role === 'enseignant' && teacherName
-          ? item.seance.enseignant === teacherName
-          : true,
-      )
+      .filter((item) => {
+        if (canViewAll) return true
+
+        if (role === 'enseignant' && teacherName) {
+          return item.seance.enseignant === teacherName
+        }
+
+        return false
+      })
   }, [
     store.cahiers,
     store.seances,
     store.vacations,
     selectedWeek,
+    canViewAll,
     role,
     teacherName,
   ])
 
   const generateMissingVacations = () => {
-    if (!permissions.canGenerate) {
-      setMessage('Vous n’avez pas le droit de générer les fiches de vacation.')
+    if (!canGenerate) {
+      setMessage('Votre rôle ne permet pas de générer les fiches de vacation.')
       return
     }
 
@@ -174,7 +213,13 @@ function VacationsPage({ user }) {
   const changeStatus = (vacation, statut) => {
     if (!vacation) return
 
-    const allowed = canChangeToStatus(role, statut)
+    const allowed = canChangeToStatus({
+      role,
+      statut,
+      canValidate,
+      canMarkPaid,
+      canSignOwnVacation,
+    })
 
     if (!allowed) {
       setMessage('Action non autorisée pour votre rôle.')
@@ -192,6 +237,11 @@ function VacationsPage({ user }) {
   }
 
   const exportVacationPdf = () => {
+    if (!canExportPdf) {
+      setMessage('Votre rôle ne permet pas d’exporter cette fiche.')
+      return
+    }
+
     if (!selectedVacation) {
       setMessage('Aucune fiche de vacation sélectionnée.')
       return
@@ -307,7 +357,7 @@ function VacationsPage({ user }) {
     setMessage('PDF de la fiche de vacation généré.')
   }
 
-  if (role === 'delegue') {
+  if (!canViewPage) {
     return (
       <div className="page">
         <div className="placeholder">
@@ -315,8 +365,8 @@ function VacationsPage({ user }) {
             <div className="placeholder-icon">FV</div>
             <h1>Accès non autorisé</h1>
             <p>
-              Les fiches de vacation ne sont pas disponibles pour le rôle
-              délégué.
+              Votre rôle actuel ({getRoleLabel(user)}) ne permet pas d’accéder
+              aux fiches de vacation.
             </p>
           </div>
         </div>
@@ -328,14 +378,11 @@ function VacationsPage({ user }) {
     <div className="page vacation-page">
       <div className="page-heading">
         <div>
-          <h1>Fiches de vacation</h1>
-          <p>
-            Suivi des heures effectuées, visas, validations et paiements des
-            enseignants.
-          </p>
+          <h1>{getPageTitle(role)}</h1>
+          <p>{getPageDescription(role)}</p>
         </div>
 
-        {permissions.canGenerate && (
+        {canGenerate && (
           <button className="primary-btn" onClick={generateMissingVacations}>
             Générer depuis les cahiers
           </button>
@@ -343,18 +390,26 @@ function VacationsPage({ user }) {
       </div>
 
       <div className="vacation-role-note">
-        <strong>{getRoleLabel(role)}</strong>
+        <strong>{getRoleLabel(user)}</strong>
         <span>{getRoleDescription(role)}</span>
       </div>
 
       <div className="stats-grid">
         <StatBox label="Fiches" value={stats.total} code="FV" />
         <StatBox label="En attente" value={stats.enAttente} code="AT" />
-        <StatBox label="Visées" value={stats.visees} code="VS" />
         <StatBox
-          label="Montant net"
-          value={formatShortMoney(stats.montant)}
-          code="FC"
+          label={role === 'enseignant' ? 'Signées' : 'Visées'}
+          value={role === 'enseignant' ? stats.signees : stats.visees}
+          code={role === 'enseignant' ? 'SG' : 'VS'}
+        />
+        <StatBox
+          label={role === 'comptable' ? 'Payées' : 'Montant net'}
+          value={
+            role === 'comptable'
+              ? stats.payees
+              : formatShortMoney(stats.montant)
+          }
+          code={role === 'comptable' ? 'OK' : 'FC'}
         />
       </div>
 
@@ -381,7 +436,7 @@ function VacationsPage({ user }) {
           <label>Professeur</label>
           <select
             value={selectedTeacher}
-            disabled={role === 'enseignant'}
+            disabled={!canViewAll || role === 'enseignant'}
             onChange={(e) => {
               setSelectedTeacher(e.target.value)
               setSelectedVacationId(null)
@@ -418,7 +473,7 @@ function VacationsPage({ user }) {
 
       {message && <div className="vacation-message">{message}</div>}
 
-      {closedCahiersWithoutVacation.length > 0 && permissions.canGenerate && (
+      {closedCahiersWithoutVacation.length > 0 && canGenerate && (
         <div className="vacation-alert">
           {closedCahiersWithoutVacation.length} cahier(s) clôturé(s) n’ont pas
           encore de fiche de vacation.
@@ -571,7 +626,7 @@ function VacationsPage({ user }) {
               </div>
 
               <div className="vacation-actions">
-                {role === 'enseignant' &&
+                {canSignOwnVacation &&
                   selectedVacation.statut === 'en_attente' && (
                     <button
                       className="primary-btn"
@@ -583,19 +638,7 @@ function VacationsPage({ user }) {
                     </button>
                   )}
 
-                {role === 'surveillant' &&
-                  ['en_attente', 'signee_enseignant'].includes(
-                    selectedVacation.statut,
-                  ) && (
-                    <button
-                      className="vacation-visa-btn"
-                      onClick={() => changeStatus(selectedVacation, 'visee')}
-                    >
-                      Viser la fiche
-                    </button>
-                  )}
-
-                {['admin', 'comptable'].includes(role) &&
+                {canValidate &&
                   ['en_attente', 'signee_enseignant', 'visee'].includes(
                     selectedVacation.statut,
                   ) && (
@@ -607,19 +650,29 @@ function VacationsPage({ user }) {
                     </button>
                   )}
 
-                {['admin', 'comptable'].includes(role) &&
-                  selectedVacation.statut === 'validee' && (
-                    <button
-                      className="vacation-pay-btn"
-                      onClick={() => changeStatus(selectedVacation, 'payee')}
-                    >
-                      Marquer comme payée
-                    </button>
-                  )}
+                {canMarkPaid && selectedVacation.statut === 'validee' && (
+                  <button
+                    className="vacation-pay-btn"
+                    onClick={() => changeStatus(selectedVacation, 'payee')}
+                  >
+                    Marquer comme payée
+                  </button>
+                )}
 
-                <button className="isge-secondary-btn" onClick={exportVacationPdf}>
-                  Télécharger fiche PDF
-                </button>
+                {canExportPdf && (
+                  <button className="isge-secondary-btn" onClick={exportVacationPdf}>
+                    Télécharger fiche PDF
+                  </button>
+                )}
+
+                {!canValidate &&
+                  !canMarkPaid &&
+                  !canSignOwnVacation &&
+                  !canExportPdf && (
+                    <div className="vacation-readonly">
+                      Consultation uniquement pour ce rôle.
+                    </div>
+                  )}
               </div>
             </>
           )}
@@ -669,45 +722,51 @@ function WorkflowStep({ title, active }) {
   )
 }
 
-function getPermissions(role) {
-  return {
-    canGenerate: ['admin', 'surveillant', 'comptable', 'enseignant'].includes(
-      role,
-    ),
-  }
-}
+function canChangeToStatus({
+  role,
+  statut,
+  canValidate,
+  canMarkPaid,
+  canSignOwnVacation,
+}) {
+  if (canSignOwnVacation && statut === 'signee_enseignant') return true
+  if (canValidate && statut === 'validee') return true
+  if (canMarkPaid && statut === 'payee') return true
 
-function canChangeToStatus(role, statut) {
-  if (role === 'admin') return true
-  if (role === 'enseignant') return statut === 'signee_enseignant'
-  if (role === 'surveillant') return statut === 'visee'
-  if (role === 'comptable') return ['validee', 'payee'].includes(statut)
+  if (role === 'admin' && statut === 'validee') return true
 
   return false
 }
 
-function getRoleLabel(role) {
-  const labels = {
-    admin: 'Administrateur',
-    enseignant: 'Enseignant',
-    delegue: 'Délégué',
-    surveillant: 'Surveillant',
-    comptable: 'Comptable',
+function getPageTitle(role) {
+  if (role === 'enseignant') return 'Mes vacations'
+  if (role === 'comptable') return 'Paiement vacations'
+
+  return 'Fiches de vacation'
+}
+
+function getPageDescription(role) {
+  if (role === 'enseignant') {
+    return 'Consultez vos fiches, vérifiez les heures effectuées et exportez vos documents.'
   }
 
-  return labels[role] || 'Utilisateur'
+  if (role === 'comptable') {
+    return 'Validez les fiches de vacation et marquez les paiements effectués.'
+  }
+
+  return 'Suivi des heures effectuées, validations et paiements des enseignants.'
 }
 
 function getRoleDescription(role) {
   const descriptions = {
     admin:
-      'Vous voyez toutes les fiches et pouvez corriger le workflow complet.',
+      'Vous voyez toutes les fiches et pouvez générer, valider et exporter les vacations.',
     enseignant:
-      'Vous voyez uniquement vos fiches de vacation et vous pouvez les signer.',
-    surveillant:
-      'Vous contrôlez les fiches et apposez le visa de surveillance.',
+      'Vous voyez uniquement vos fiches de vacation et vous pouvez les exporter.',
     comptable:
-      'Vous validez les fiches et marquez les paiements effectués.',
+      'Vous voyez toutes les fiches, vous validez les dossiers et vous marquez les paiements effectués.',
+    surveillant:
+      'Le surveillant n’intervient pas dans les fiches de vacation dans cette version.',
     delegue:
       'Le délégué n’intervient pas dans les fiches de vacation.',
   }
