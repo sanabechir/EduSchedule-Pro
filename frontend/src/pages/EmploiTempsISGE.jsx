@@ -8,6 +8,16 @@ import {
 import { getClassNameFromUser, getTeacherNameFromUser } from '../services/userScope'
 import { exportHtmlToPdf } from '../services/pdfExport'
 import { getHolidayForWeekDay } from '../services/burkinaHolidays'
+import {
+  canCreateEmploiTemps,
+  canDeleteEmploiTemps,
+  canExportEmploiTempsPdf,
+  canUpdateEmploiTemps,
+  canViewAllPlanningClasses,
+  canViewAllPlanningTeachers,
+  canViewEmploiTemps,
+  getRoleLabel,
+} from '../services/permissions'
 
 const API_BASE = 'http://127.0.0.1/EduSchedule-Pro/backend/api'
 
@@ -50,6 +60,14 @@ function EmploiTempsISGE({ user }) {
   const teacherName = getTeacherNameFromUser(user)
   const delegateClass = getClassNameFromUser(user)
 
+  const canViewPage = canViewEmploiTemps(user)
+  const canCreate = canCreateEmploiTemps(user)
+  const canUpdate = canUpdateEmploiTemps(user)
+  const canDelete = canDeleteEmploiTemps(user)
+  const canExportPdf = canExportEmploiTempsPdf(user)
+  const canViewAllClasses = canViewAllPlanningClasses(user)
+  const canViewAllTeachers = canViewAllPlanningTeachers(user)
+
   const [selectedWeek, setSelectedWeek] = useState(DEFAULT_WEEK_KEY)
   const [selectedClasse, setSelectedClasse] = useState(
     role === 'delegue' && delegateClass ? delegateClass : 'Toutes',
@@ -76,8 +94,6 @@ function EmploiTempsISGE({ user }) {
 
   const week =
     WEEK_OPTIONS.find((item) => item.key === selectedWeek) || WEEK_OPTIONS[0]
-
-  const canManage = role === 'admin'
 
   const loadSchedule = async () => {
     try {
@@ -126,8 +142,35 @@ function EmploiTempsISGE({ user }) {
 
   const classes = useMemo(() => {
     const names = uniqueValues(apiData.classes.map((item) => item.nom))
+
+    if (!canViewAllClasses && role === 'delegue' && delegateClass) {
+      return [delegateClass]
+    }
+
+    if (!canViewAllClasses && role === 'enseignant') {
+      const teacherClasses = uniqueValues(
+        apiData.seances
+          .filter(
+            (seance) =>
+              seance.enseignant === teacherName ||
+              seance.enseignant_email === user?.email,
+          )
+          .map((seance) => seance.classe),
+      )
+
+      return teacherClasses.length > 0 ? teacherClasses : ['Toutes']
+    }
+
     return ['Toutes', ...names]
-  }, [apiData.classes])
+  }, [
+    apiData.classes,
+    apiData.seances,
+    canViewAllClasses,
+    role,
+    delegateClass,
+    teacherName,
+    user?.email,
+  ])
 
   const teachers = useMemo(() => {
     const names = uniqueValues(
@@ -136,8 +179,12 @@ function EmploiTempsISGE({ user }) {
       ),
     )
 
+    if (!canViewAllTeachers && role === 'enseignant' && teacherName) {
+      return [teacherName]
+    }
+
     return ['Tous', ...names]
-  }, [apiData.enseignants])
+  }, [apiData.enseignants, canViewAllTeachers, role, teacherName])
 
   const rooms = useMemo(() => {
     return uniqueValues(apiData.salles.map((item) => item.nom))
@@ -230,11 +277,19 @@ function EmploiTempsISGE({ user }) {
       filteredSeances.map((item) => item.classe),
     )
 
+    if (role === 'delegue' && delegateClass) {
+      return [delegateClass]
+    }
+
+    if (role === 'enseignant') {
+      return filteredClassNames
+    }
+
     if (selectedClasse !== 'Toutes') {
       return [selectedClasse]
     }
 
-    if (selectedTeacher !== 'Tous' || role === 'enseignant') {
+    if (selectedTeacher !== 'Tous') {
       return filteredClassNames
     }
 
@@ -244,6 +299,7 @@ function EmploiTempsISGE({ user }) {
     selectedClasse,
     selectedTeacher,
     role,
+    delegateClass,
     apiData.classes,
   ])
 
@@ -324,8 +380,8 @@ function EmploiTempsISGE({ user }) {
   }
 
   const openAddForm = () => {
-    if (!canManage) {
-      setMessage('Seul l’administrateur peut ajouter une séance.')
+    if (!canCreate) {
+      setMessage('Votre rôle ne permet pas d’ajouter une séance.')
       return
     }
 
@@ -363,7 +419,7 @@ function EmploiTempsISGE({ user }) {
   }
 
   const submitSeance = async () => {
-    if (!canManage) {
+    if (!canCreate) {
       setMessage('Action non autorisée.')
       return
     }
@@ -434,8 +490,8 @@ function EmploiTempsISGE({ user }) {
   }
 
   const deleteSeance = async (seanceId) => {
-    if (!canManage) {
-      setMessage('Seul l’administrateur peut supprimer une séance.')
+    if (!canDelete) {
+      setMessage('Votre rôle ne permet pas de supprimer une séance.')
       return
     }
 
@@ -492,6 +548,11 @@ function EmploiTempsISGE({ user }) {
   }
 
   const exportSchedulePdf = () => {
+    if (!canExportPdf) {
+      setMessage('Votre rôle ne permet pas d’exporter l’emploi du temps.')
+      return
+    }
+
     const contentHtml = `
       ${visibleClasses
         .map(
@@ -520,18 +581,41 @@ function EmploiTempsISGE({ user }) {
     setMessage('PDF de l’emploi du temps généré.')
   }
 
+  if (!canViewPage) {
+    return (
+      <div className="page emploi-page">
+        <div className="page-heading">
+          <div>
+            <h1>Accès non autorisé</h1>
+            <p>
+              Votre rôle actuel ({getRoleLabel(user)}) ne permet pas de consulter
+              l’emploi du temps.
+            </p>
+          </div>
+        </div>
+
+        <section className="panel emploi-empty-panel">
+          Cette page n’est pas disponible pour votre profil.
+        </section>
+      </div>
+    )
+  }
+
   return (
     <div className="page emploi-page">
       <div className="page-heading">
         <div>
           <h1>Emploi du temps</h1>
           <p>
-            Données chargées depuis MySQL : classes, professeurs, modules,
-            salles, horaires et jours fériés du Burkina Faso.
+            {role === 'enseignant'
+              ? 'Consultez uniquement vos cours planifiés.'
+              : role === 'delegue'
+                ? 'Consultez l’emploi du temps de votre classe.'
+                : 'Données chargées depuis MySQL : classes, professeurs, modules, salles, horaires et jours fériés du Burkina Faso.'}
           </p>
         </div>
 
-        {canManage && (
+        {canCreate && (
           <button className="primary-btn" onClick={openAddForm}>
             + Nouvelle séance
           </button>
@@ -543,7 +627,7 @@ function EmploiTempsISGE({ user }) {
           <label>Classe</label>
           <select
             value={selectedClasse}
-            disabled={role === 'delegue'}
+            disabled={!canViewAllClasses || role === 'delegue'}
             onChange={(e) => {
               setSelectedClasse(e.target.value)
               setMessage('')
@@ -561,7 +645,7 @@ function EmploiTempsISGE({ user }) {
           <label>Professeur</label>
           <select
             value={selectedTeacher}
-            disabled={role === 'enseignant'}
+            disabled={!canViewAllTeachers || role === 'enseignant'}
             onChange={(e) => {
               setSelectedTeacher(e.target.value)
               setMessage('')
@@ -596,9 +680,11 @@ function EmploiTempsISGE({ user }) {
           Réinitialiser
         </button>
 
-        <button className="isge-secondary-btn pdf-btn" onClick={exportSchedulePdf}>
-          Exporter PDF
-        </button>
+        {canExportPdf && (
+          <button className="isge-secondary-btn pdf-btn" onClick={exportSchedulePdf}>
+            Exporter PDF
+          </button>
+        )}
       </div>
 
       {loading && <div className="emploi-message">Chargement depuis MySQL...</div>}
@@ -607,7 +693,7 @@ function EmploiTempsISGE({ user }) {
 
       {message && <div className="emploi-message">{message}</div>}
 
-      {showForm && (
+      {showForm && canCreate && (
         <section className="panel emploi-form-panel">
           <div className="panel-header">
             <h3>Nouvelle séance</h3>
@@ -797,7 +883,8 @@ function EmploiTempsISGE({ user }) {
             week={week}
             selectedWeek={selectedWeek}
             timeRows={MAIN_TIME_ROWS}
-            canManage={canManage}
+            canDelete={canDelete}
+            canUpdate={canUpdate}
             getSeancesForCell={getSeancesForCell}
             onDelete={deleteSeance}
           />
@@ -818,7 +905,7 @@ function ClassScheduleTable({
   week,
   selectedWeek,
   timeRows,
-  canManage,
+  canDelete,
   getSeancesForCell,
   onDelete,
 }) {
@@ -915,7 +1002,7 @@ function ClassScheduleTable({
 
                               <em>{seance.type?.toUpperCase() || 'COURS'}</em>
 
-                              {canManage && (
+                              {canDelete && (
                                 <button onClick={() => onDelete(seance.id)}>
                                   Supprimer
                                 </button>
