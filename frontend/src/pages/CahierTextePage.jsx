@@ -28,6 +28,9 @@ import {
 } from '../services/permissions'
 
 const API_BASE = 'http://127.0.0.1/EduSchedule-Pro/backend/api'
+const SCHEDULE_API_URL = `${API_BASE}/schedule.php`
+const POINTAGE_API_URL = `${API_BASE}/teacher_qr.php`
+const CAHIER_API_URL = `${API_BASE}/cahiers_texte.php`
 
 const EMPTY_FORM = {
   titre: '',
@@ -37,7 +40,7 @@ const EMPTY_FORM = {
 }
 
 function CahierTextePage({ user }) {
-  const { store, actions } = useAppStore()
+  const { actions } = useAppStore()
 
   const role = normalizeRole(user?.role || 'admin')
   const teacherName = getTeacherNameFromUser(user)
@@ -62,11 +65,14 @@ function CahierTextePage({ user }) {
     isDelegateRole && delegateClass ? delegateClass : 'Toutes',
   )
   const [selectedSeanceId, setSelectedSeanceId] = useState(null)
+
   const [form, setForm] = useState(EMPTY_FORM)
   const [message, setMessage] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [pointageLoading, setPointageLoading] = useState(false)
   const [error, setError] = useState('')
+
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [pointageLoading, setPointageLoading] = useState(false)
 
   const [apiData, setApiData] = useState({
     seances: [],
@@ -74,6 +80,7 @@ function CahierTextePage({ user }) {
   })
 
   const [backendPointages, setBackendPointages] = useState([])
+  const [backendCahiers, setBackendCahiers] = useState([])
 
   const week = getWeek(selectedWeek)
 
@@ -81,12 +88,9 @@ function CahierTextePage({ user }) {
     try {
       setLoading(true)
       setError('')
-      setMessage('')
 
       const res = await fetch(
-        `${API_BASE}/schedule.php?action=list&week=${encodeURIComponent(
-          selectedWeek,
-        )}`,
+        `${SCHEDULE_API_URL}?action=list&week=${encodeURIComponent(selectedWeek)}`,
         {
           method: 'GET',
           headers: {
@@ -120,9 +124,11 @@ function CahierTextePage({ user }) {
         classes: json.data?.classes || [],
       })
 
-      syncSeancesOnlyIfNeeded(seances)
+      if (typeof actions.syncBackendSeances === 'function') {
+        actions.syncBackendSeances(seances)
+      }
     } catch (err) {
-      setError(err.message || 'Impossible de charger le cahier de texte.')
+      setError(err.message || 'Impossible de charger les séances.')
       setApiData({
         seances: [],
         classes: [],
@@ -134,11 +140,9 @@ function CahierTextePage({ user }) {
 
   const loadBackendPointages = async ({ silent = true } = {}) => {
     try {
-      if (!silent) {
-        setPointageLoading(true)
-      }
+      if (!silent) setPointageLoading(true)
 
-      const res = await fetch(`${API_BASE}/teacher_qr.php?action=history&limit=300`, {
+      const res = await fetch(`${POINTAGE_API_URL}?action=history&limit=300`, {
         method: 'GET',
         headers: {
           Accept: 'application/json',
@@ -165,37 +169,68 @@ function CahierTextePage({ user }) {
         setMessage(err.message || 'Impossible de charger les pointages.')
       }
     } finally {
+      if (!silent) setPointageLoading(false)
+    }
+  }
+
+  const loadBackendCahiers = async ({ silent = true } = {}) => {
+    try {
+      const res = await fetch(
+        `${CAHIER_API_URL}?action=list&week=${encodeURIComponent(selectedWeek)}`,
+        {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+          },
+        },
+      )
+
+      const text = await res.text()
+
+      let json
+
+      try {
+        json = JSON.parse(text)
+      } catch {
+        throw new Error(`Réponse cahiers_texte.php invalide : ${text.slice(0, 180)}`)
+      }
+
+      if (!json.success) {
+        throw new Error(json.message || 'Impossible de charger les cahiers.')
+      }
+
+      setBackendCahiers(json.data?.cahiers || [])
+    } catch (err) {
       if (!silent) {
-        setPointageLoading(false)
+        setMessage(err.message || 'Impossible de charger les cahiers.')
       }
     }
   }
 
-  const syncSeancesOnlyIfNeeded = (seances) => {
-    if (typeof actions.syncBackendSeances !== 'function') return
-
-    const backendIds = seances.map((item) => String(item.id))
-
-    const alreadySynced = backendIds.every((id) =>
-      (store.seances || []).some((item) => String(item.id) === id),
-    )
-
-    if (!alreadySynced) {
-      actions.syncBackendSeances(seances)
-    }
+  const loadEverything = async () => {
+    await Promise.all([
+      loadSchedule(),
+      loadBackendPointages({ silent: true }),
+      loadBackendCahiers({ silent: true }),
+    ])
   }
 
   useEffect(() => {
-    loadSchedule()
-    loadBackendPointages({ silent: true })
+    loadEverything()
+    setSelectedSeanceId(null)
+    setMessage('')
   }, [selectedWeek])
 
   useEffect(() => {
     const interval = setInterval(() => {
       loadBackendPointages({ silent: true })
-    }, 2500)
+      loadBackendCahiers({ silent: true })
+    }, 3000)
 
-    const refreshOnFocus = () => loadBackendPointages({ silent: true })
+    const refreshOnFocus = () => {
+      loadBackendPointages({ silent: true })
+      loadBackendCahiers({ silent: true })
+    }
 
     const refreshOnPointage = () => {
       loadBackendPointages({ silent: true })
@@ -205,19 +240,25 @@ function CahierTextePage({ user }) {
       if (event.key === 'eduschedule_pointage_updated_at') {
         loadBackendPointages({ silent: true })
       }
+
+      if (event.key === 'eduschedule_cahier_updated_at') {
+        loadBackendCahiers({ silent: true })
+      }
     }
 
     window.addEventListener('focus', refreshOnFocus)
     window.addEventListener('storage', refreshOnStorage)
     window.addEventListener('eduschedule-pointage-updated', refreshOnPointage)
+    window.addEventListener('eduschedule-cahier-updated', refreshOnFocus)
 
     return () => {
       clearInterval(interval)
       window.removeEventListener('focus', refreshOnFocus)
       window.removeEventListener('storage', refreshOnStorage)
       window.removeEventListener('eduschedule-pointage-updated', refreshOnPointage)
+      window.removeEventListener('eduschedule-cahier-updated', refreshOnFocus)
     }
-  }, [])
+  }, [selectedWeek])
 
   const classes = useMemo(() => {
     const names = [
@@ -230,7 +271,6 @@ function CahierTextePage({ user }) {
 
     if (isDelegateRole && delegateClass) {
       const matchedClass = names.find((classe) => classMatches(classe, delegateClass))
-
       return [matchedClass || delegateClass]
     }
 
@@ -269,11 +309,9 @@ function CahierTextePage({ user }) {
       .filter((item) => item.weekKey === selectedWeek)
       .filter((item) => {
         const dayIndex = week.days.findIndex((day) => day.key === item.jour)
-
         if (dayIndex < 0) return true
 
         const holiday = getHolidayForWeekDay(week, selectedWeek, dayIndex)
-
         return !holiday
       })
       .filter((item) =>
@@ -330,11 +368,11 @@ function CahierTextePage({ user }) {
     if (!selectedSeance) return null
 
     return (
-      (store.cahiers || []).find((item) =>
-        sameId(item.seanceId, selectedSeance.id),
-      ) || null
+      backendCahiers.find((item) => sameId(item.seanceId, selectedSeance.id)) ||
+      backendCahiers.find((item) => sameId(item.creneau_id, selectedSeance.id)) ||
+      null
     )
-  }, [store.cahiers, selectedSeance])
+  }, [backendCahiers, selectedSeance])
 
   const pointage = useMemo(() => {
     if (!selectedSeance) return null
@@ -342,11 +380,10 @@ function CahierTextePage({ user }) {
     return getPointageForSeance({
       seance: selectedSeance,
       backendPointages,
-      localPointages: store.pointages || [],
       week,
       selectedWeek,
     })
-  }, [backendPointages, store.pointages, selectedSeance, week, selectedWeek])
+  }, [backendPointages, selectedSeance, week, selectedWeek])
 
   useEffect(() => {
     if (!cahier) {
@@ -365,8 +402,8 @@ function CahierTextePage({ user }) {
   const stats = useMemo(() => {
     const seanceIds = seances.map((item) => Number(item.id))
 
-    const cahiersForFilter = (store.cahiers || []).filter((item) =>
-      seanceIds.includes(Number(item.seanceId)),
+    const cahiersForFilter = backendCahiers.filter((item) =>
+      seanceIds.includes(Number(item.seanceId || item.creneau_id)),
     )
 
     const pointagesForFilter = seances
@@ -374,7 +411,6 @@ function CahierTextePage({ user }) {
         getPointageForSeance({
           seance,
           backendPointages,
-          localPointages: store.pointages || [],
           week,
           selectedWeek,
         }),
@@ -383,13 +419,13 @@ function CahierTextePage({ user }) {
 
     return {
       seances: seances.length,
+      pointages: pointagesForFilter.length,
       renseignes: cahiersForFilter.length,
       signesDelegue: cahiersForFilter.filter((item) => item.signatureDelegue)
         .length,
       clotures: cahiersForFilter.filter((item) => item.locked).length,
-      pointages: pointagesForFilter.length,
     }
-  }, [seances, store.cahiers, store.pointages, backendPointages, week, selectedWeek])
+  }, [seances, backendCahiers, backendPointages, week, selectedWeek])
 
   const canFillCurrent =
     selectedSeance &&
@@ -399,7 +435,11 @@ function CahierTextePage({ user }) {
       isSurveillantRole ||
       canFillPermission ||
       canEditPermission ||
-      canValidatePermission)
+      canValidatePermission) &&
+    (!isTeacherRole ||
+      !teacherName ||
+      selectedSeance.enseignant === teacherName ||
+      selectedSeance.enseignant_email === user?.email)
 
   const canSignDelegue =
     selectedSeance &&
@@ -421,7 +461,7 @@ function CahierTextePage({ user }) {
       selectedSeance.enseignant === teacherName ||
       selectedSeance.enseignant_email === user?.email)
 
-  const saveCahier = () => {
+  const saveCahier = async () => {
     if (!selectedSeance) {
       setMessage('Aucune séance sélectionnée.')
       return
@@ -442,29 +482,46 @@ function CahierTextePage({ user }) {
       return
     }
 
-    const result = actions.saveCahier(Number(selectedSeance.id), {
-      titre: form.titre,
-      contenu: form.contenu,
-      travaux: form.travaux,
-      observation: form.observation,
-      signatureDelegue: cahier?.signatureDelegue || false,
-      signatureEnseignant: cahier?.signatureEnseignant || false,
-      signatureDelegueImage: cahier?.signatureDelegueImage || '',
-      signatureEnseignantImage: cahier?.signatureEnseignantImage || '',
-      locked: cahier?.locked || false,
-      statut: cahier?.statut || 'brouillon',
-    })
+    try {
+      setSaving(true)
+      setMessage('Enregistrement du cahier...')
 
-    if (!result.success) {
-      setMessage(result.message || 'Erreur lors de l’enregistrement.')
-      return
+      const res = await fetch(`${CAHIER_API_URL}?action=save`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          creneau_id: Number(selectedSeance.id),
+          titre: form.titre,
+          contenu: form.contenu,
+          travaux: form.travaux,
+          observation: form.observation,
+          created_by: user?.email || user?.nom || user?.name || 'system',
+          updated_by: user?.email || user?.nom || user?.name || 'system',
+        }),
+      })
+
+      const json = await parseJsonResponse(res, 'cahiers_texte.php')
+
+      if (!json.success) {
+        throw new Error(json.message || 'Erreur lors de l’enregistrement.')
+      }
+
+      upsertCahier(json.data?.cahier)
+      notifyCahierUpdated()
+
+      setSelectedSeanceId(Number(selectedSeance.id))
+      setMessage('Cahier de texte enregistré avec succès.')
+    } catch (err) {
+      setMessage(err.message || 'Erreur lors de l’enregistrement.')
+    } finally {
+      setSaving(false)
     }
-
-    setSelectedSeanceId(Number(selectedSeance.id))
-    setMessage('Cahier de texte enregistré avec succès.')
   }
 
-  const signDelegue = (signatureImage) => {
+  const signDelegue = async (signatureImage) => {
     if (!selectedSeance || !cahier) {
       setMessage('Le cahier doit d’abord être rempli avant signature.')
       return
@@ -480,36 +537,42 @@ function CahierTextePage({ user }) {
       return
     }
 
-    const saveResult = actions.saveCahier(Number(selectedSeance.id), {
-      titre: cahier.titre || '',
-      contenu: cahier.contenu || '',
-      travaux: cahier.travaux || '',
-      observation: cahier.observation || '',
-      signatureDelegue: false,
-      signatureEnseignant: cahier.signatureEnseignant || false,
-      signatureDelegueImage: signatureImage,
-      signatureEnseignantImage: cahier.signatureEnseignantImage || '',
-      locked: false,
-      statut: cahier.statut || 'brouillon',
-    })
+    try {
+      setSaving(true)
+      setMessage('Enregistrement de la signature du délégué...')
 
-    if (!saveResult.success) {
-      setMessage(saveResult.message || 'Erreur lors de la signature du délégué.')
-      return
+      const res = await fetch(`${CAHIER_API_URL}?action=sign_delegue`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          creneau_id: Number(selectedSeance.id),
+          signature: signatureImage,
+          updated_by: user?.email || user?.nom || user?.name || 'delegue',
+        }),
+      })
+
+      const json = await parseJsonResponse(res, 'cahiers_texte.php')
+
+      if (!json.success) {
+        throw new Error(json.message || 'Erreur lors de la signature du délégué.')
+      }
+
+      upsertCahier(json.data?.cahier)
+      notifyCahierUpdated()
+
+      setSelectedSeanceId(Number(selectedSeance.id))
+      setMessage('Signature du délégué enregistrée avec succès.')
+    } catch (err) {
+      setMessage(err.message || 'Erreur lors de la signature du délégué.')
+    } finally {
+      setSaving(false)
     }
-
-    const result = actions.signCahier(Number(selectedSeance.id), 'delegue')
-
-    if (!result.success) {
-      setMessage(result.message || 'Erreur lors de la validation de signature.')
-      return
-    }
-
-    setSelectedSeanceId(Number(selectedSeance.id))
-    setMessage('Signature du délégué enregistrée avec succès.')
   }
 
-  const signTeacher = (signatureImage) => {
+  const signTeacher = async (signatureImage) => {
     if (!selectedSeance || !cahier) {
       setMessage('Le cahier doit d’abord être rempli.')
       return
@@ -525,39 +588,58 @@ function CahierTextePage({ user }) {
       return
     }
 
-    const saveResult = actions.saveCahier(Number(selectedSeance.id), {
-      titre: cahier.titre || '',
-      contenu: cahier.contenu || '',
-      travaux: cahier.travaux || '',
-      observation: cahier.observation || '',
-      signatureDelegue: cahier.signatureDelegue || false,
-      signatureEnseignant: false,
-      signatureDelegueImage: cahier.signatureDelegueImage || '',
-      signatureEnseignantImage: signatureImage,
-      locked: false,
-      statut: cahier.statut || 'signe_delegue',
-    })
+    try {
+      setSaving(true)
+      setMessage('Enregistrement de la signature enseignant...')
 
-    if (!saveResult.success) {
+      const res = await fetch(`${CAHIER_API_URL}?action=sign_enseignant`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          creneau_id: Number(selectedSeance.id),
+          signature: signatureImage,
+          updated_by: user?.email || user?.nom || user?.name || 'enseignant',
+        }),
+      })
+
+      const json = await parseJsonResponse(res, 'cahiers_texte.php')
+
+      if (!json.success) {
+        throw new Error(json.message || 'Erreur lors de la signature enseignant.')
+      }
+
+      upsertCahier(json.data?.cahier)
+      notifyCahierUpdated()
+
+      if (typeof actions.generateVacation === 'function') {
+        actions.generateVacation(Number(selectedSeance.id))
+      }
+
+      setSelectedSeanceId(Number(selectedSeance.id))
       setMessage(
-        saveResult.message || 'Erreur lors de la signature enseignant.',
+        'Signature enseignant enregistrée. Le cahier est clôturé et la vacation est générée.',
       )
-      return
+    } catch (err) {
+      setMessage(err.message || 'Erreur lors de la signature enseignant.')
+    } finally {
+      setSaving(false)
     }
+  }
 
-    const result = actions.signCahier(Number(selectedSeance.id), 'enseignant')
+  const upsertCahier = (nextCahier) => {
+    if (!nextCahier) return
 
-    if (!result.success) {
-      setMessage(result.message || 'Erreur lors de la validation enseignant.')
-      return
-    }
+    setBackendCahiers((current) => {
+      const filtered = current.filter(
+        (item) =>
+          !sameId(item.seanceId || item.creneau_id, nextCahier.seanceId || nextCahier.creneau_id),
+      )
 
-    actions.generateVacation(Number(selectedSeance.id))
-
-    setSelectedSeanceId(Number(selectedSeance.id))
-    setMessage(
-      'Signature enseignant enregistrée. Le cahier est clôturé et la vacation est générée.',
-    )
+      return [nextCahier, ...filtered]
+    })
   }
 
   const exportCahierPdf = () => {
@@ -677,14 +759,14 @@ function CahierTextePage({ user }) {
         <div>
           <h1>Cahier de texte</h1>
           <p>
-            Suivi pédagogique synchronisé avec les séances et pointages de la
-            semaine sélectionnée.
+            Suivi pédagogique synchronisé avec MySQL : séances, pointages,
+            signatures et clôture.
           </p>
         </div>
 
         {selectedSeance && canFillCurrent && (
-          <button className="primary-btn" onClick={saveCahier}>
-            Enregistrer le cahier
+          <button className="primary-btn" onClick={saveCahier} disabled={saving}>
+            {saving ? 'Enregistrement...' : 'Enregistrer le cahier'}
           </button>
         )}
       </div>
@@ -742,10 +824,13 @@ function CahierTextePage({ user }) {
         <button
           type="button"
           className="isge-secondary-btn"
-          onClick={() => loadBackendPointages({ silent: false })}
+          onClick={() => {
+            loadBackendPointages({ silent: false })
+            loadBackendCahiers({ silent: false })
+          }}
           disabled={pointageLoading}
         >
-          {pointageLoading ? 'Actualisation...' : 'Actualiser pointages'}
+          {pointageLoading ? 'Actualisation...' : 'Actualiser'}
         </button>
       </div>
 
@@ -773,14 +858,13 @@ function CahierTextePage({ user }) {
 
             {seances.map((seance) => {
               const itemCahier =
-                (store.cahiers || []).find((item) =>
-                  sameId(item.seanceId, seance.id),
+                backendCahiers.find((item) =>
+                  sameId(item.seanceId || item.creneau_id, seance.id),
                 ) || null
 
               const itemPointage = getPointageForSeance({
                 seance,
                 backendPointages,
-                localPointages: store.pointages || [],
                 week,
                 selectedWeek,
               })
@@ -871,6 +955,7 @@ function CahierTextePage({ user }) {
                   signed={!!cahier?.signatureDelegue}
                   image={cahier?.signatureDelegueImage}
                   canSign={!!canSignDelegue}
+                  disabled={saving}
                   blockedText={
                     !cahier
                       ? 'Cahier non renseigné'
@@ -887,6 +972,7 @@ function CahierTextePage({ user }) {
                   signed={!!cahier?.signatureEnseignant}
                   image={cahier?.signatureEnseignantImage}
                   canSign={!!canSignTeacher}
+                  disabled={saving}
                   blockedText={
                     !cahier
                       ? 'Cahier non renseigné'
@@ -905,7 +991,7 @@ function CahierTextePage({ user }) {
                   <label>Titre de la séance</label>
                   <input
                     value={form.titre}
-                    disabled={!canFillCurrent}
+                    disabled={!canFillCurrent || saving}
                     placeholder="Ex : Introduction aux formulaires HTML"
                     onChange={(e) =>
                       setForm((current) => ({
@@ -920,7 +1006,7 @@ function CahierTextePage({ user }) {
                   <label>Contenu réalisé</label>
                   <textarea
                     value={form.contenu}
-                    disabled={!canFillCurrent}
+                    disabled={!canFillCurrent || saving}
                     placeholder="Décris les points vus pendant la séance..."
                     onChange={(e) =>
                       setForm((current) => ({
@@ -935,7 +1021,7 @@ function CahierTextePage({ user }) {
                   <label>Travaux demandés</label>
                   <textarea
                     value={form.travaux}
-                    disabled={!canFillCurrent}
+                    disabled={!canFillCurrent || saving}
                     placeholder="Exercices, recherches ou devoirs donnés..."
                     onChange={(e) =>
                       setForm((current) => ({
@@ -950,7 +1036,7 @@ function CahierTextePage({ user }) {
                   <label>Observations</label>
                   <textarea
                     value={form.observation}
-                    disabled={!canFillCurrent}
+                    disabled={!canFillCurrent || saving}
                     placeholder="Retard, absence, progression, remarques..."
                     onChange={(e) =>
                       setForm((current) => ({
@@ -964,8 +1050,8 @@ function CahierTextePage({ user }) {
 
               <div className="cahier-actions">
                 {canFillCurrent && (
-                  <button className="primary-btn" onClick={saveCahier}>
-                    Enregistrer
+                  <button className="primary-btn" onClick={saveCahier} disabled={saving}>
+                    {saving ? 'Enregistrement...' : 'Enregistrer'}
                   </button>
                 )}
 
@@ -1005,6 +1091,7 @@ function SignatureBox({
   image,
   canSign,
   blockedText,
+  disabled,
   onSign,
 }) {
   const canvasRef = useRef(null)
@@ -1013,7 +1100,7 @@ function SignatureBox({
   const [error, setError] = useState('')
 
   useEffect(() => {
-    if (!canSign || signed) return
+    if (!canSign || signed || disabled) return
 
     const canvas = canvasRef.current
     if (!canvas) return
@@ -1023,10 +1110,10 @@ function SignatureBox({
     }, 80)
 
     return () => clearTimeout(timer)
-  }, [canSign, signed])
+  }, [canSign, signed, disabled])
 
   const startDrawing = (event) => {
-    if (!canSign || signed) return
+    if (!canSign || signed || disabled) return
 
     event.preventDefault()
 
@@ -1043,7 +1130,7 @@ function SignatureBox({
   }
 
   const draw = (event) => {
-    if (!isDrawing || !canSign || signed) return
+    if (!isDrawing || !canSign || signed || disabled) return
 
     event.preventDefault()
 
@@ -1069,6 +1156,8 @@ function SignatureBox({
   }
 
   const submitSignature = () => {
+    if (disabled) return
+
     if (!hasInk) {
       setError('Dessinez la signature avant de valider.')
       return
@@ -1094,7 +1183,7 @@ function SignatureBox({
           ) : (
             <span className="signature-written">Signé</span>
           )
-        ) : canSign ? (
+        ) : canSign && !disabled ? (
           <canvas
             ref={canvasRef}
             className="signature-canvas"
@@ -1113,7 +1202,7 @@ function SignatureBox({
 
       {error && <div className="signature-error">{error}</div>}
 
-      {canSign && !signed && (
+      {canSign && !signed && !disabled && (
         <div className="signature-tools">
           <button type="button" className="cahier-sign-btn" onClick={submitSignature}>
             Valider la signature
@@ -1237,7 +1326,7 @@ function getWeek(weekKey) {
   return WEEK_OPTIONS.find((item) => item.key === weekKey) || WEEK_OPTIONS[0]
 }
 
-function getPointageForSeance({ seance, backendPointages, localPointages, week, selectedWeek }) {
+function getPointageForSeance({ seance, backendPointages, week, selectedWeek }) {
   if (!seance) return null
 
   const expectedDate = getDateForSeance(week, selectedWeek, seance.jour)
@@ -1274,9 +1363,7 @@ function getPointageForSeance({ seance, backendPointages, localPointages, week, 
     }
   }
 
-  return (
-    localPointages.find((item) => sameId(item.seanceId, seance.id)) || null
-  )
+  return null
 }
 
 function getDateForSeance(week, selectedWeek, jour) {
@@ -1299,6 +1386,28 @@ function getDateForSeance(week, selectedWeek, jour) {
   const local = new Date(monday.getTime() - offset * 60 * 1000)
 
   return local.toISOString().slice(0, 10)
+}
+
+async function parseJsonResponse(res, sourceName) {
+  const text = await res.text()
+
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw new Error(`Réponse ${sourceName} invalide : ${text.slice(0, 180)}`)
+  }
+}
+
+function notifyCahierUpdated() {
+  const value = String(Date.now())
+
+  try {
+    localStorage.setItem('eduschedule_cahier_updated_at', value)
+  } catch {
+    // Ignore localStorage errors.
+  }
+
+  window.dispatchEvent(new CustomEvent('eduschedule-cahier-updated'))
 }
 
 function normalizeRole(value) {
