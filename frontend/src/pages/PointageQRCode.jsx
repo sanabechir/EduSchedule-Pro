@@ -3,27 +3,43 @@ import QRCode from 'qrcode'
 import './PointageQRCode.css'
 import { DEFAULT_WEEK_KEY, WEEK_OPTIONS } from '../services/appStore'
 import { getClassNameFromUser, getTeacherNameFromUser } from '../services/userScope'
+import {
+  canGenerateQr,
+  canManualPointage,
+  canViewAllPointageHistory,
+  canViewPointageTechnicalInfo,
+  getRoleLabel,
+  isAdmin,
+  isDelegue,
+  isSurveillant,
+  isTeacher,
+  normalizeRole,
+} from '../services/permissions'
 
-const API_URL = 'http://127.0.0.1/EduSchedule-Pro/backend/api/teacher_qr.php'
+const API_BASE = 'http://127.0.0.1/EduSchedule-Pro/backend/api'
+const QR_API_URL = `${API_BASE}/teacher_qr.php`
+const SCHEDULE_API_URL = `${API_BASE}/schedule.php`
 
 const DAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi']
 
 function PointageQRCode({ user }) {
-  const role = String(user?.role || 'admin').toLowerCase()
+  const role = normalizeRole(user?.role || 'admin')
   const teacherName = getTeacherNameFromUser(user)
   const delegateClass = getClassNameFromUser(user)
 
-  const isAdmin = role === 'admin' || role === 'administrateur'
-  const isSurveillant = role === 'surveillant'
-  const isTeacher = role === 'enseignant'
-  const isDelegue = role === 'delegue'
+  const admin = isAdmin(user)
+  const surveillant = isSurveillant(user)
+  const teacher = isTeacher(user)
+  const delegue = isDelegue(user)
 
-  const canGenerateQr = isAdmin || isSurveillant || isTeacher
-  const canManualPointage = isAdmin || isSurveillant
-  const canSeeTechnicalInfo = isAdmin
-  const canSeeAllCourses = isAdmin || isSurveillant
+  const canGenerate = canGenerateQr(user)
+  const canManual = canManualPointage(user)
+  const canSeeTechnicalInfo = canViewPointageTechnicalInfo(user)
+  const canSeeAllHistory = canViewAllPointageHistory(user)
+  const canSeeAllCourses = admin || surveillant
 
-  const [loading, setLoading] = useState(true)
+  const [loadingCourses, setLoadingCourses] = useState(true)
+  const [loadingHistory, setLoadingHistory] = useState(true)
   const [refreshingHistory, setRefreshingHistory] = useState(false)
   const [message, setMessage] = useState('')
   const [networkMessage, setNetworkMessage] = useState('')
@@ -36,10 +52,10 @@ function PointageQRCode({ user }) {
 
   const [selectedWeek, setSelectedWeek] = useState(DEFAULT_WEEK_KEY)
   const [selectedClasse, setSelectedClasse] = useState(
-    isDelegue && delegateClass ? delegateClass : 'Toutes',
+    delegue && delegateClass ? delegateClass : 'Toutes',
   )
   const [selectedTeacher, setSelectedTeacher] = useState(
-    isTeacher && teacherName ? teacherName : 'Tous',
+    teacher && teacherName ? teacherName : 'Tous',
   )
   const [selectedCourseId, setSelectedCourseId] = useState('')
   const [selectedDate, setSelectedDate] = useState(getTodayIsoDate())
@@ -59,33 +75,42 @@ function PointageQRCode({ user }) {
     WEEK_OPTIONS.find((item) => item.key === selectedWeek) || WEEK_OPTIONS[0]
 
   const pageTitle = useMemo(() => {
-    if (isTeacher) return 'Mes pointages'
-    if (isSurveillant) return 'Contrôle pointage'
-    if (isDelegue) return 'Suivi pointage'
+    if (teacher) return 'Mes pointages'
+    if (surveillant) return 'Contrôle pointage'
+    if (delegue) return 'Suivi pointage'
     return 'Administration pointage'
-  }, [isTeacher, isSurveillant, isDelegue])
+  }, [teacher, surveillant, delegue])
 
   const pageDescription = useMemo(() => {
-    if (isTeacher) {
-      return 'Générez le QR de vos cours et scannez-le avec votre téléphone pour marquer votre présence.'
+    if (teacher) {
+      return 'Générez le QR de vos cours et scannez-le avec votre téléphone pour confirmer votre présence.'
     }
 
-    if (isSurveillant) {
+    if (surveillant) {
       return 'Contrôlez les présences, générez un QR si nécessaire et effectuez un pointage manuel.'
     }
 
-    if (isDelegue) {
+    if (delegue) {
       return 'Consultez les pointages liés à votre classe.'
     }
 
     return 'Gestion complète des QR codes, pointages manuels, historiques et paramètres techniques.'
-  }, [isTeacher, isSurveillant, isDelegue])
+  }, [teacher, surveillant, delegue])
 
-  const loadData = async ({ silent = false } = {}) => {
+  const loadCourses = async ({ silent = false } = {}) => {
     try {
-      if (!silent) setLoading(true)
+      if (!silent) setLoadingCourses(true)
 
-      const res = await fetch(`${API_URL}?action=list`)
+      const res = await fetch(
+        `${SCHEDULE_API_URL}?action=list&week=${encodeURIComponent(selectedWeek)}`,
+        {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+          },
+        },
+      )
+
       const text = await res.text()
 
       let json
@@ -93,38 +118,116 @@ function PointageQRCode({ user }) {
       try {
         json = JSON.parse(text)
       } catch {
-        throw new Error(`Réponse API invalide : ${text.slice(0, 180)}`)
+        throw new Error(`Réponse schedule.php invalide : ${text.slice(0, 180)}`)
       }
 
       if (!json.success) {
-        throw new Error(json.message || 'Erreur lors du chargement.')
+        throw new Error(json.message || 'Erreur lors du chargement des cours.')
       }
 
-      setCreneaux(json.data?.creneaux || [])
+      const seances = (json.data?.seances || []).map((course) => ({
+        ...course,
+        id: Number(course.id),
+        weekKey: course.weekKey || course.week_key || selectedWeek,
+      }))
+
+      setCreneaux(seances)
       setClasses(json.data?.classes || [])
       setEnseignants(json.data?.enseignants || [])
+
+      if (!silent) setMessage('')
+    } catch (err) {
+      if (!silent) {
+        setMessage(err.message || 'Impossible de charger les cours.')
+      }
+
+      setCreneaux([])
+      setClasses([])
+      setEnseignants([])
+    } finally {
+      if (!silent) setLoadingCourses(false)
+    }
+  }
+
+  const loadHistory = async ({ silent = false } = {}) => {
+    try {
+      if (!silent) setLoadingHistory(true)
+
+      const res = await fetch(`${QR_API_URL}?action=history&limit=300`, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+      })
+
+      const text = await res.text()
+
+      let json
+
+      try {
+        json = JSON.parse(text)
+      } catch {
+        throw new Error(`Réponse teacher_qr.php invalide : ${text.slice(0, 180)}`)
+      }
+
+      if (!json.success) {
+        throw new Error(json.message || 'Erreur lors du chargement des pointages.')
+      }
+
       setPresences(json.data?.presences || [])
+    } catch (err) {
+      if (!silent) {
+        setMessage(err.message || 'Impossible de charger l’historique.')
+      }
+    } finally {
+      if (!silent) setLoadingHistory(false)
+    }
+  }
+
+  const loadTokensAndNetwork = async ({ silent = true } = {}) => {
+    try {
+      const res = await fetch(`${QR_API_URL}?action=list`, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+      })
+
+      const text = await res.text()
+
+      let json
+
+      try {
+        json = JSON.parse(text)
+      } catch {
+        throw new Error(`Réponse teacher_qr.php invalide : ${text.slice(0, 180)}`)
+      }
+
+      if (!json.success) {
+        throw new Error(json.message || 'Erreur lors du chargement technique.')
+      }
+
       setTokens(json.data?.tokens || [])
 
       if (json.data?.network?.mobile_url) {
         setScanBaseUrl((currentUrl) => currentUrl || json.data.network.mobile_url)
         setDetectedIp(json.data.network.ip || '')
       }
-
-      if (!silent) setMessage('')
     } catch (err) {
       if (!silent) {
-        setMessage(err.message || 'Impossible de charger les données.')
+        setMessage(err.message || 'Impossible de charger les données techniques QR.')
       }
-    } finally {
-      if (!silent) setLoading(false)
     }
+  }
+
+  const loadInitialData = async () => {
+    await Promise.all([loadCourses(), loadHistory(), loadTokensAndNetwork()])
   }
 
   const refreshHistory = async () => {
     try {
       setRefreshingHistory(true)
-      await loadData({ silent: true })
+      await loadHistory({ silent: true })
       setMessage('Historique actualisé.')
     } catch {
       setMessage('Impossible d’actualiser l’historique.')
@@ -139,7 +242,13 @@ function PointageQRCode({ user }) {
         setNetworkMessage('Détection de l’adresse IP en cours...')
       }
 
-      const res = await fetch(`${API_URL}?action=network`)
+      const res = await fetch(`${QR_API_URL}?action=network`, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+      })
+
       const text = await res.text()
 
       let json
@@ -174,8 +283,16 @@ function PointageQRCode({ user }) {
   }
 
   useEffect(() => {
-    loadData()
+    loadInitialData()
   }, [])
+
+  useEffect(() => {
+    loadCourses()
+    setSelectedCourseId('')
+    setQrDataUrl('')
+    setScanUrl('')
+    setExpiresAt('')
+  }, [selectedWeek])
 
   useEffect(() => {
     refreshNetwork({ silent: !canSeeTechnicalInfo })
@@ -183,39 +300,80 @@ function PointageQRCode({ user }) {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      loadData({ silent: true })
-    }, 5000)
+      loadHistory({ silent: true })
+    }, 2000)
 
     return () => clearInterval(interval)
   }, [])
 
+  useEffect(() => {
+    const handleFocus = () => {
+      loadHistory({ silent: true })
+    }
+
+    const handleStorage = (event) => {
+      if (event.key === 'eduschedule_pointage_updated_at') {
+        loadHistory({ silent: true })
+      }
+    }
+
+    const handleCustomRefresh = () => {
+      loadHistory({ silent: true })
+    }
+
+    window.addEventListener('focus', handleFocus)
+    window.addEventListener('storage', handleStorage)
+    window.addEventListener('eduschedule-pointage-updated', handleCustomRefresh)
+
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('storage', handleStorage)
+      window.removeEventListener('eduschedule-pointage-updated', handleCustomRefresh)
+    }
+  }, [])
+
   const classOptions = useMemo(() => {
-    const names = uniqueValues(classes.map((classe) => classe.nom))
+    const namesFromClasses = classes.map((classe) => classe.nom)
+    const namesFromCourses = creneaux.map((course) => course.classe)
+
+    const names = uniqueValues([...namesFromClasses, ...namesFromCourses])
+
+    if (delegue && delegateClass) {
+      return [delegateClass]
+    }
+
     return ['Toutes', ...names]
-  }, [classes])
+  }, [classes, creneaux, delegue, delegateClass])
 
   const teacherOptions = useMemo(() => {
-    const names = uniqueValues(
-      enseignants.map(
-        (teacher) =>
-          teacher.nom_complet || `${teacher.nom || ''} ${teacher.prenom || ''}`.trim(),
-      ),
+    const namesFromTeachers = enseignants.map(
+      (teacherItem) =>
+        teacherItem.nom_complet ||
+        `${teacherItem.nom || ''} ${teacherItem.prenom || ''}`.trim(),
     )
 
+    const namesFromCourses = creneaux.map((course) => course.enseignant)
+
+    const names = uniqueValues([...namesFromTeachers, ...namesFromCourses])
+
+    if (teacher && teacherName) {
+      return [teacherName]
+    }
+
     return ['Tous', ...names]
-  }, [enseignants])
+  }, [enseignants, creneaux, teacher, teacherName])
 
   const filteredCourses = useMemo(() => {
     return creneaux
       .filter((course) => {
-        if (isTeacher && teacherName) {
+        if (teacher && teacherName) {
           return (
             course.enseignant === teacherName ||
             course.enseignant_email === user?.email
           )
         }
 
-        if (isDelegue && delegateClass) {
+        if (delegue && delegateClass) {
           return course.classe === delegateClass
         }
 
@@ -239,8 +397,8 @@ function PointageQRCode({ user }) {
     creneaux,
     selectedClasse,
     selectedTeacher,
-    isTeacher,
-    isDelegue,
+    teacher,
+    delegue,
     teacherName,
     delegateClass,
     user?.email,
@@ -268,10 +426,12 @@ function PointageQRCode({ user }) {
 
   useEffect(() => {
     if (!selectedCourseId && filteredCourses.length > 0) {
-      const priorityCourse = isTeacher && todayCourses.length > 0 ? todayCourses[0] : filteredCourses[0]
+      const priorityCourse =
+        teacher && todayCourses.length > 0 ? todayCourses[0] : filteredCourses[0]
 
       setSelectedCourseId(String(priorityCourse.id))
       setSelectedDate(getDateForCourse(week, selectedWeek, priorityCourse.jour))
+      return
     }
 
     if (
@@ -279,13 +439,15 @@ function PointageQRCode({ user }) {
       filteredCourses.length > 0 &&
       !filteredCourses.some((course) => Number(course.id) === Number(selectedCourseId))
     ) {
-      const first = isTeacher && todayCourses.length > 0 ? todayCourses[0] : filteredCourses[0]
+      const first =
+        teacher && todayCourses.length > 0 ? todayCourses[0] : filteredCourses[0]
 
       setSelectedCourseId(String(first.id))
       setSelectedDate(getDateForCourse(week, selectedWeek, first.jour))
       setQrDataUrl('')
       setScanUrl('')
       setExpiresAt('')
+      return
     }
 
     if (filteredCourses.length === 0) {
@@ -299,7 +461,7 @@ function PointageQRCode({ user }) {
     selectedCourseId,
     week,
     selectedWeek,
-    isTeacher,
+    teacher,
     todayCourses,
   ])
 
@@ -314,15 +476,19 @@ function PointageQRCode({ user }) {
 
     return presences
       .filter((presence) => {
-        if (isTeacher && teacherName) {
+        if (teacher && teacherName) {
           return (
             presence.enseignant === teacherName ||
             presence.enseignant_email === user?.email
           )
         }
 
-        if (isDelegue && delegateClass) {
+        if (delegue && delegateClass) {
           return presence.classe === delegateClass
+        }
+
+        if (!canSeeAllHistory && !teacher && !delegue) {
+          return false
         }
 
         return true
@@ -335,26 +501,37 @@ function PointageQRCode({ user }) {
       )
       .filter((presence) => {
         if (!weekDates.start || !weekDates.end) return true
-        return presence.date_cours >= weekDates.start && presence.date_cours <= weekDates.end
+
+        const dateCours =
+          presence.date_cours || presence.date || presence.dateCours || ''
+
+        return dateCours >= weekDates.start && dateCours <= weekDates.end
       })
       .filter((presence) =>
         selectedStatus === 'Tous' ? true : presence.statut === selectedStatus,
       )
+      .sort((a, b) => {
+        const dateA = `${a.date_cours || ''} ${a.scanned_at || ''}`
+        const dateB = `${b.date_cours || ''} ${b.scanned_at || ''}`
+
+        return dateB.localeCompare(dateA)
+      })
   }, [
     presences,
     selectedClasse,
     selectedTeacher,
     selectedStatus,
     selectedWeek,
-    isTeacher,
-    isDelegue,
+    teacher,
+    delegue,
     teacherName,
     delegateClass,
     user?.email,
+    canSeeAllHistory,
   ])
 
   const generateQr = async () => {
-    if (!canGenerateQr) {
+    if (!canGenerate) {
       setMessage('Votre rôle ne permet pas de générer un QR code.')
       return
     }
@@ -364,11 +541,12 @@ function PointageQRCode({ user }) {
       return
     }
 
-    if (!scanBaseUrl) {
-      await refreshNetwork({ silent: true })
-    }
+    let finalScanBaseUrl = scanBaseUrl
 
-    const finalScanBaseUrl = scanBaseUrl
+    if (!finalScanBaseUrl) {
+      await refreshNetwork({ silent: true })
+      finalScanBaseUrl = scanBaseUrl
+    }
 
     if (!finalScanBaseUrl) {
       setMessage('Lien de scan indisponible. Vérifie que WAMP est démarré.')
@@ -382,7 +560,7 @@ function PointageQRCode({ user }) {
       setScanUrl('')
       setExpiresAt('')
 
-      const res = await fetch(`${API_URL}?action=generate`, {
+      const res = await fetch(`${QR_API_URL}?action=generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -425,13 +603,16 @@ function PointageQRCode({ user }) {
       setScanUrl(url)
       setExpiresAt(json.data?.expires_at || '')
 
-      if (isTeacher) {
+      if (teacher) {
         setMessage('QR généré. Scannez-le avec votre téléphone pour pointer.')
       } else {
         setMessage('QR code généré avec succès.')
       }
 
-      await loadData({ silent: true })
+      await Promise.all([
+        loadHistory({ silent: true }),
+        loadTokensAndNetwork({ silent: true }),
+      ])
     } catch (err) {
       setMessage(err.message || 'Erreur lors de la génération du QR code.')
     } finally {
@@ -440,7 +621,7 @@ function PointageQRCode({ user }) {
   }
 
   const saveManualPointage = async () => {
-    if (!canManualPointage) {
+    if (!canManual) {
       setMessage('Votre rôle ne permet pas de faire un pointage manuel.')
       return
     }
@@ -452,9 +633,9 @@ function PointageQRCode({ user }) {
 
     try {
       setManualSaving(true)
-      setMessage('')
+      setMessage('Enregistrement du pointage...')
 
-      const res = await fetch(`${API_URL}?action=manual`, {
+      const res = await fetch(`${QR_API_URL}?action=manual`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -481,8 +662,34 @@ function PointageQRCode({ user }) {
         throw new Error(json.message || 'Impossible d’enregistrer le pointage manuel.')
       }
 
+      const newPresence = json.data?.presence
+
+      if (newPresence) {
+        setPresences((current) => {
+          const filtered = current.filter((item) => {
+            const itemCourseId =
+              item.creneau_id || item.seanceId || item.seance_id || item.creneauId
+
+            const newCourseId =
+              newPresence.creneau_id ||
+              newPresence.seanceId ||
+              newPresence.seance_id ||
+              newPresence.creneauId
+
+            return !(
+              Number(itemCourseId) === Number(newCourseId) &&
+              item.date_cours === newPresence.date_cours
+            )
+          })
+
+          return [newPresence, ...filtered]
+        })
+      }
+
       setMessage('Pointage manuel enregistré.')
-      await loadData({ silent: true })
+
+      notifyPointageUpdated()
+      await loadHistory({ silent: true })
     } catch (err) {
       setMessage(err.message || 'Erreur lors du pointage manuel.')
     } finally {
@@ -492,8 +699,8 @@ function PointageQRCode({ user }) {
 
   const resetFilters = () => {
     setSelectedWeek(DEFAULT_WEEK_KEY)
-    setSelectedClasse(isDelegue && delegateClass ? delegateClass : 'Toutes')
-    setSelectedTeacher(isTeacher && teacherName ? teacherName : 'Tous')
+    setSelectedClasse(delegue && delegateClass ? delegateClass : 'Toutes')
+    setSelectedTeacher(teacher && teacherName ? teacherName : 'Tous')
     setSelectedStatus('Tous')
     setManualStatus('present')
     setQrDataUrl('')
@@ -506,7 +713,7 @@ function PointageQRCode({ user }) {
     <div className={`page qr-page role-${role}`}>
       <div className="page-heading qr-heading">
         <div>
-          <span className="qr-role-badge">{getRoleLabel(role)}</span>
+          <span className="qr-role-badge">{getRoleLabel(user)}</span>
           <h1>{pageTitle}</h1>
           <p>{pageDescription}</p>
         </div>
@@ -518,14 +725,19 @@ function PointageQRCode({ user }) {
         )}
       </div>
 
-      {loading && <div className="qr-message">Chargement des données...</div>}
+      {loadingCourses && <div className="qr-message">Chargement des cours...</div>}
+
+      {loadingHistory && (
+        <div className="qr-message">Chargement de l’historique...</div>
+      )}
+
       {message && <div className="qr-message">{message}</div>}
 
       {canSeeTechnicalInfo && networkMessage && (
         <div className="qr-message network-message">{networkMessage}</div>
       )}
 
-      {isTeacher && (
+      {teacher && (
         <section className="panel qr-teacher-focus">
           <div className="panel-header">
             <div>
@@ -582,9 +794,9 @@ function PointageQRCode({ user }) {
         <div className="panel qr-control-panel">
           <div className="panel-header">
             <div>
-              <h3>{isTeacher ? 'Générer mon QR de présence' : 'Générer un QR de cours'}</h3>
+              <h3>{teacher ? 'Générer mon QR de présence' : 'Générer un QR de cours'}</h3>
               <p>
-                {isTeacher
+                {teacher
                   ? 'Sélectionnez un de vos cours, générez le QR, puis scannez-le avec votre téléphone.'
                   : 'Choisissez exactement le cours à pointer.'}
               </p>
@@ -633,7 +845,7 @@ function PointageQRCode({ user }) {
               </div>
             )}
 
-            {!isTeacher && canSeeAllCourses && (
+            {!teacher && canSeeAllCourses && (
               <div className="qr-field">
                 <label>Professeur</label>
                 <select
@@ -646,16 +858,18 @@ function PointageQRCode({ user }) {
                     setExpiresAt('')
                   }}
                 >
-                  {teacherOptions.map((teacher) => (
-                    <option key={teacher} value={teacher}>
-                      {teacher === 'Tous' ? 'Tous les professeurs' : teacher}
+                  {teacherOptions.map((teacherOption) => (
+                    <option key={teacherOption} value={teacherOption}>
+                      {teacherOption === 'Tous'
+                        ? 'Tous les professeurs'
+                        : teacherOption}
                     </option>
                   ))}
                 </select>
               </div>
             )}
 
-            {isTeacher && (
+            {teacher && (
               <div className="qr-field">
                 <label>Professeur</label>
                 <input value={teacherName || 'Enseignant'} disabled />
@@ -768,11 +982,11 @@ function PointageQRCode({ user }) {
             <button
               className="primary-btn"
               onClick={generateQr}
-              disabled={!canGenerateQr || generating || filteredCourses.length === 0}
+              disabled={!canGenerate || generating || filteredCourses.length === 0}
             >
               {generating
                 ? 'Génération...'
-                : isTeacher
+                : teacher
                   ? 'Générer mon QR'
                   : 'Générer le QR Code'}
             </button>
@@ -782,7 +996,7 @@ function PointageQRCode({ user }) {
             </button>
           </div>
 
-          {!canGenerateQr && (
+          {!canGenerate && (
             <div className="qr-warning">
               Votre rôle actuel ne permet pas de générer un QR code.
             </div>
@@ -792,9 +1006,9 @@ function PointageQRCode({ user }) {
         <div className="panel qr-result-panel">
           <div className="panel-header">
             <div>
-              <h3>{isTeacher ? 'Mon QR à scanner' : 'QR Code généré'}</h3>
+              <h3>{teacher ? 'Mon QR à scanner' : 'QR Code généré'}</h3>
               <p>
-                {isTeacher
+                {teacher
                   ? 'Scannez ce QR avec votre téléphone pour confirmer votre présence.'
                   : 'À scanner avec le téléphone du professeur.'}
               </p>
@@ -836,7 +1050,7 @@ function PointageQRCode({ user }) {
         </div>
       </section>
 
-      {canManualPointage && (
+      {canManual && (
         <section className="panel qr-manual-panel">
           <div className="panel-header">
             <div>
@@ -880,7 +1094,7 @@ function PointageQRCode({ user }) {
                 className="primary-btn"
                 onClick={saveManualPointage}
                 disabled={
-                  !canManualPointage ||
+                  !canManual ||
                   manualSaving ||
                   !selectedCourseId ||
                   filteredCourses.length === 0
@@ -896,11 +1110,11 @@ function PointageQRCode({ user }) {
       <section className="panel qr-history-panel">
         <div className="panel-header">
           <div>
-            <h3>{isTeacher ? 'Mes pointages récents' : 'Historique des pointages'}</h3>
+            <h3>{teacher ? 'Mes pointages récents' : 'Historique des pointages'}</h3>
             <p>
-              {isTeacher
+              {teacher
                 ? 'Retrouvez vos pointages de la semaine sélectionnée.'
-                : 'Filtré selon la semaine, la classe, le professeur et le statut. Actualisation automatique toutes les 5 secondes.'}
+                : 'Filtré selon la semaine, la classe, le professeur et le statut.'}
             </p>
           </div>
 
@@ -934,7 +1148,7 @@ function PointageQRCode({ user }) {
               <tr>
                 <th>Date</th>
                 <th>Classe</th>
-                {!isTeacher && <th>Professeur</th>}
+                {!teacher && <th>Professeur</th>}
                 <th>Matière</th>
                 <th>Horaire</th>
                 <th>Salle</th>
@@ -948,7 +1162,7 @@ function PointageQRCode({ user }) {
                 <tr key={presence.id}>
                   <td>{formatDate(presence.date_cours)}</td>
                   <td>{presence.classe}</td>
-                  {!isTeacher && <td>{presence.enseignant}</td>}
+                  {!teacher && <td>{presence.enseignant}</td>}
                   <td>{presence.matiere}</td>
                   <td>{presence.horaire}</td>
                   <td>{presence.salle}</td>
@@ -963,7 +1177,7 @@ function PointageQRCode({ user }) {
 
               {filteredPresences.length === 0 && (
                 <tr>
-                  <td colSpan={isTeacher ? 7 : 8} className="qr-empty-row">
+                  <td colSpan={teacher ? 7 : 8} className="qr-empty-row">
                     Aucun pointage trouvé pour ces filtres.
                   </td>
                 </tr>
@@ -1003,6 +1217,18 @@ function PointageQRCode({ user }) {
       )}
     </div>
   )
+}
+
+function notifyPointageUpdated() {
+  const value = String(Date.now())
+
+  try {
+    localStorage.setItem('eduschedule_pointage_updated_at', value)
+  } catch {
+    // Ignore localStorage errors.
+  }
+
+  window.dispatchEvent(new CustomEvent('eduschedule-pointage-updated'))
 }
 
 function uniqueValues(values) {
@@ -1158,15 +1384,6 @@ function getStatusLabel(status) {
   if (status === 'absent') return 'Absent'
 
   return status || '—'
-}
-
-function getRoleLabel(role) {
-  if (role === 'admin' || role === 'administrateur') return 'Administrateur'
-  if (role === 'surveillant') return 'Surveillant'
-  if (role === 'enseignant') return 'Enseignant'
-  if (role === 'delegue') return 'Délégué'
-
-  return role || 'Utilisateur'
 }
 
 function getCourseTimingStatus(dateCours, horaire) {

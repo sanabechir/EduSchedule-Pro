@@ -10,12 +10,15 @@ export const ROLES = {
 }
 
 export function normalizeRole(role) {
-  return String(role || 'admin').toLowerCase().trim()
+  return String(role || 'admin')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
 }
 
 export function isAdmin(user) {
   const role = normalizeRole(user?.role)
-
   return role === ROLES.ADMIN || role === ROLES.ADMINISTRATEUR
 }
 
@@ -81,7 +84,14 @@ export function getRoleInitial(userOrRole) {
 
 export const PERMISSIONS = {
   dashboard: {
-    view: ['admin', 'administrateur', 'enseignant', 'delegue', 'surveillant', 'comptable'],
+    view: [
+      'admin',
+      'administrateur',
+      'enseignant',
+      'delegue',
+      'surveillant',
+      'comptable',
+    ],
   },
 
   emploiTemps: {
@@ -107,8 +117,8 @@ export const PERMISSIONS = {
     view: ['admin', 'administrateur', 'enseignant', 'delegue', 'surveillant'],
     fill: ['admin', 'administrateur', 'enseignant'],
     edit: ['admin', 'administrateur', 'enseignant'],
-    signTeacher: ['enseignant'],
-    signDelegue: ['delegue'],
+    signTeacher: ['admin', 'administrateur', 'enseignant'],
+    signDelegue: ['admin', 'administrateur', 'delegue'],
     validate: ['admin', 'administrateur', 'surveillant'],
     exportPdf: ['admin', 'administrateur', 'enseignant', 'surveillant'],
     viewAll: ['admin', 'administrateur', 'surveillant'],

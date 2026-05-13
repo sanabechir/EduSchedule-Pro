@@ -100,12 +100,17 @@ function EmploiTempsISGE({ user }) {
       setLoading(true)
       setError('')
 
-      const res = await fetch(`${API_BASE}/schedule.php?action=list`, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
+      const res = await fetch(
+        `${API_BASE}/schedule.php?action=list&week=${encodeURIComponent(
+          selectedWeek,
+        )}`,
+        {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+          },
         },
-      })
+      )
 
       const text = await res.text()
 
@@ -138,7 +143,7 @@ function EmploiTempsISGE({ user }) {
 
   useEffect(() => {
     loadSchedule()
-  }, [])
+  }, [selectedWeek])
 
   const classes = useMemo(() => {
     const names = uniqueValues(apiData.classes.map((item) => item.nom))
@@ -461,6 +466,8 @@ function EmploiTempsISGE({ user }) {
         },
         body: JSON.stringify({
           ...form,
+          week_key: selectedWeek,
+          weekKey: selectedWeek,
           horaire: normalizedHoraire,
         }),
       })

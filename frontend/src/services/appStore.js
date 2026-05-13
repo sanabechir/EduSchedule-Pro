@@ -70,6 +70,7 @@ const INITIAL_SEANCES = [
     classe: 'Licence 1 RIT',
     matiere: 'Programmation Web',
     enseignant: 'TRAORE Jean',
+    enseignant_email: '',
     salle: 'A101',
     jour: 'Lundi',
     horaire: '07h30-09h30',
@@ -84,6 +85,7 @@ const INITIAL_SEANCES = [
     classe: 'Licence 1 RIT',
     matiere: 'Base de Données',
     enseignant: 'KABORE Paul',
+    enseignant_email: '',
     salle: 'B201',
     jour: 'Mardi',
     horaire: '10h00-12h15',
@@ -98,6 +100,7 @@ const INITIAL_SEANCES = [
     classe: 'Licence 1 RIT',
     matiere: 'Réseaux',
     enseignant: 'OUEDRAOGO Issa',
+    enseignant_email: '',
     salle: 'A102',
     jour: 'Mercredi',
     horaire: '13h00-16h00',
@@ -112,6 +115,7 @@ const INITIAL_SEANCES = [
     classe: 'Licence 2 RIT',
     matiere: 'Sécurité',
     enseignant: 'SANKARA Mariam',
+    enseignant_email: '',
     salle: 'A101',
     jour: 'Jeudi',
     horaire: '13h00-16h00',
@@ -126,6 +130,7 @@ const INITIAL_SEANCES = [
     classe: 'Licence 2 RIT',
     matiere: 'Cloud Computing',
     enseignant: 'COMPAORE Adama',
+    enseignant_email: '',
     salle: 'B201',
     jour: 'Vendredi',
     horaire: '15h00-18h00',
@@ -140,6 +145,7 @@ const INITIAL_SEANCES = [
     classe: 'Licence 3 RIT',
     matiere: 'Programmation Web Avancée',
     enseignant: 'SAWADOGO Ibrahim',
+    enseignant_email: '',
     salle: 'A102',
     jour: 'Lundi',
     horaire: '07h30-09h30',
@@ -154,6 +160,7 @@ const INITIAL_SEANCES = [
     classe: 'Licence 3 RIT',
     matiere: 'Administration Linux',
     enseignant: 'NIKIEMA Salif',
+    enseignant_email: '',
     salle: 'Labo Réseaux',
     jour: 'Mardi',
     horaire: '13h00-16h00',
@@ -168,6 +175,7 @@ const INITIAL_SEANCES = [
     classe: 'Licence 3 RIT',
     matiere: 'Cybersécurité',
     enseignant: 'ZONGO Aminata',
+    enseignant_email: '',
     salle: 'B202',
     jour: 'Jeudi',
     horaire: '15h00-18h00',
@@ -182,6 +190,7 @@ const INITIAL_SEANCES = [
     classe: 'Master 1 RSI',
     matiere: 'Base de Données Avancées',
     enseignant: 'NIKIEMA Salif',
+    enseignant_email: '',
     salle: 'B202',
     jour: 'Mercredi',
     horaire: '13h00-16h00',
@@ -196,6 +205,7 @@ const INITIAL_SEANCES = [
     classe: 'Master 1 RSI',
     matiere: 'Sécurité des Réseaux',
     enseignant: 'OUEDRAOGO Issa',
+    enseignant_email: '',
     salle: 'C301',
     jour: 'Vendredi',
     horaire: '10h00-12h15',
@@ -210,6 +220,7 @@ const INITIAL_SEANCES = [
     classe: 'Master 2 RSI',
     matiere: 'Réseaux Haut Débit',
     enseignant: 'ZONGO Aminata',
+    enseignant_email: '',
     salle: 'C301',
     jour: 'Vendredi',
     horaire: '15h00-18h00',
@@ -224,6 +235,7 @@ const INITIAL_SEANCES = [
     classe: 'Master 2 RSI',
     matiere: 'Audit et Gouvernance SI',
     enseignant: 'TRAORE Jean',
+    enseignant_email: '',
     salle: 'B202',
     jour: 'Samedi',
     horaire: '07h30-09h30',
@@ -238,6 +250,7 @@ const INITIAL_SEANCES = [
     classe: 'Licence 1 RIT',
     matiere: 'Programmation Web',
     enseignant: 'TRAORE Jean',
+    enseignant_email: '',
     salle: 'A101',
     jour: 'Lundi',
     horaire: '10h00-12h15',
@@ -252,6 +265,7 @@ const INITIAL_SEANCES = [
     classe: 'Licence 2 RIT',
     matiere: 'Sécurité',
     enseignant: 'SANKARA Mariam',
+    enseignant_email: '',
     salle: 'B202',
     jour: 'Mardi',
     horaire: '07h30-09h30',
@@ -266,6 +280,7 @@ const INITIAL_SEANCES = [
     classe: 'Master 1 RSI',
     matiere: 'Sécurité des Réseaux',
     enseignant: 'OUEDRAOGO Issa',
+    enseignant_email: '',
     salle: 'C301',
     jour: 'Jeudi',
     horaire: '13h00-16h00',
@@ -315,7 +330,10 @@ const INITIAL_CAHIERS = [
     statut: 'signe_enseignant',
     signatureDelegue: true,
     signatureEnseignant: true,
+    signatureDelegueImage: '',
+    signatureEnseignantImage: '',
     locked: true,
+    updatedAt: new Date().toISOString(),
   },
   {
     id: 'c2',
@@ -328,7 +346,10 @@ const INITIAL_CAHIERS = [
     statut: 'signe_delegue',
     signatureDelegue: true,
     signatureEnseignant: false,
+    signatureDelegueImage: '',
+    signatureEnseignantImage: '',
     locked: false,
+    updatedAt: new Date().toISOString(),
   },
 ]
 
@@ -343,6 +364,8 @@ const INITIAL_VACATIONS = [
     retenue: 0,
     montantNet: 20000,
     statut: 'validee',
+    createdAt: new Date().toISOString(),
+    updatedAt: '',
   },
   {
     id: 'v2',
@@ -354,6 +377,8 @@ const INITIAL_VACATIONS = [
     retenue: 0,
     montantNet: 30000,
     statut: 'en_attente',
+    createdAt: new Date().toISOString(),
+    updatedAt: '',
   },
 ]
 
@@ -453,17 +478,11 @@ function loadStore() {
 
     return {
       version: STORE_VERSION,
-      seances: Array.isArray(parsed.seances) ? parsed.seances : INITIAL_SEANCES,
-      pointages: Array.isArray(parsed.pointages)
-        ? parsed.pointages
-        : INITIAL_POINTAGES,
-      cahiers: Array.isArray(parsed.cahiers) ? parsed.cahiers : INITIAL_CAHIERS,
-      vacations: Array.isArray(parsed.vacations)
-        ? parsed.vacations
-        : INITIAL_VACATIONS,
-      activities: Array.isArray(parsed.activities)
-        ? parsed.activities
-        : INITIAL_ACTIVITIES,
+      seances: normalizeSeanceArray(parsed.seances, INITIAL_SEANCES),
+      pointages: normalizePointageArray(parsed.pointages, INITIAL_POINTAGES),
+      cahiers: normalizeCahierArray(parsed.cahiers, INITIAL_CAHIERS),
+      vacations: normalizeVacationArray(parsed.vacations, INITIAL_VACATIONS),
+      activities: normalizeActivityArray(parsed.activities, INITIAL_ACTIVITIES),
     }
   } catch {
     localStorage.setItem(STORE_KEY, JSON.stringify(initialStore))
@@ -474,7 +493,11 @@ function loadStore() {
 function saveStore(nextStore) {
   currentStore = {
     version: STORE_VERSION,
-    ...nextStore,
+    seances: normalizeSeanceArray(nextStore.seances, []),
+    pointages: normalizePointageArray(nextStore.pointages, []),
+    cahiers: normalizeCahierArray(nextStore.cahiers, []),
+    vacations: normalizeVacationArray(nextStore.vacations, []),
+    activities: normalizeActivityArray(nextStore.activities, []),
   }
 
   localStorage.setItem(STORE_KEY, JSON.stringify(currentStore))
@@ -525,7 +548,7 @@ export const appSelectors = {
   },
 
   getSeanceById(id) {
-    return currentStore.seances.find((item) => item.id === id) || null
+    return currentStore.seances.find((item) => sameId(item.id, id)) || null
   },
 
   getSeancesByWeek(weekKey) {
@@ -541,15 +564,24 @@ export const appSelectors = {
   },
 
   getCahierBySeance(seanceId) {
-    return currentStore.cahiers.find((item) => item.seanceId === seanceId)
+    return (
+      currentStore.cahiers.find((item) => sameId(item.seanceId, seanceId)) ||
+      null
+    )
   },
 
   getPointageBySeance(seanceId) {
-    return currentStore.pointages.find((item) => item.seanceId === seanceId)
+    return (
+      currentStore.pointages.find((item) => sameId(item.seanceId, seanceId)) ||
+      null
+    )
   },
 
   getVacationBySeance(seanceId) {
-    return currentStore.vacations.find((item) => item.seanceId === seanceId)
+    return (
+      currentStore.vacations.find((item) => sameId(item.seanceId, seanceId)) ||
+      null
+    )
   },
 
   getStats() {
@@ -566,8 +598,9 @@ export const appSelectors = {
       cahiers: cahiers.length,
       cahiersClotures: cahiers.filter((item) => item.locked).length,
       vacations: vacations.length,
-      vacationsValidees: vacations.filter((item) => item.statut === 'validee')
-        .length,
+      vacationsValidees: vacations.filter((item) =>
+        ['validee', 'payee'].includes(item.statut),
+      ).length,
       montantVacations: vacations.reduce(
         (total, item) => total + Number(item.montantNet || 0),
         0,
@@ -579,13 +612,34 @@ export const appSelectors = {
 export const appActions = {
   resetStore() {
     saveStore(initialStore)
+
+    return {
+      success: true,
+    }
+  },
+
+  clearLocalData() {
+    saveStore({
+      version: STORE_VERSION,
+      seances: [],
+      pointages: [],
+      cahiers: [],
+      vacations: [],
+      activities: [],
+    })
+
+    return {
+      success: true,
+    }
   },
 
   addActivity(activity) {
     const nextActivity = {
-      id: `a-${Date.now()}`,
-      date: new Date().toISOString(),
-      ...activity,
+      id: activity.id || `a-${Date.now()}-${Math.random()}`,
+      date: activity.date || new Date().toISOString(),
+      type: activity.type || 'info',
+      title: activity.title || 'Activité',
+      text: activity.text || '',
     }
 
     saveStore({
@@ -596,13 +650,39 @@ export const appActions = {
     return nextActivity
   },
 
+  syncBackendSeances(seances = []) {
+    const normalizedBackendSeances = seances
+      .map((seance) => normalizeBackendSeance(seance))
+      .filter(Boolean)
+
+    const backendIds = normalizedBackendSeances.map((item) => String(item.id))
+
+    const localOnlySeances = currentStore.seances.filter((item) => {
+      if (item.createdBy === 'backend') return false
+      if (item.createdBy === 'system') return false
+
+      return !backendIds.includes(String(item.id))
+    })
+
+    saveStore({
+      ...currentStore,
+      seances: [...localOnlySeances, ...normalizedBackendSeances],
+    })
+
+    return {
+      success: true,
+      seances: normalizedBackendSeances,
+    }
+  },
+
   addSeance(seance) {
-    const candidate = {
-      id: `s-${Date.now()}`,
-      weekKey: seance.weekKey || DEFAULT_WEEK_KEY,
+    const candidate = normalizeLocalSeance({
+      id: seance.id || `s-${Date.now()}`,
+      weekKey: seance.weekKey || seance.week_key || DEFAULT_WEEK_KEY,
       classe: seance.classe,
       matiere: seance.matiere,
       enseignant: seance.enseignant,
+      enseignant_email: seance.enseignant_email || '',
       salle: seance.salle,
       jour: seance.jour,
       horaire: seance.horaire,
@@ -610,7 +690,7 @@ export const appActions = {
       groupe: seance.groupe || null,
       statut: seance.statut || 'planifiee',
       createdBy: seance.createdBy || 'local',
-    }
+    })
 
     const conflicts = getScheduleConflicts(candidate, currentStore.seances)
 
@@ -639,7 +719,7 @@ export const appActions = {
   },
 
   updateSeance(id, updates) {
-    const existing = currentStore.seances.find((item) => item.id === id)
+    const existing = currentStore.seances.find((item) => sameId(item.id, id))
 
     if (!existing) {
       return {
@@ -648,12 +728,15 @@ export const appActions = {
       }
     }
 
-    const candidate = {
+    const candidate = normalizeLocalSeance({
       ...existing,
       ...updates,
-    }
+    })
 
-    const otherSeances = currentStore.seances.filter((item) => item.id !== id)
+    const otherSeances = currentStore.seances.filter(
+      (item) => !sameId(item.id, id),
+    )
+
     const conflicts = getScheduleConflicts(candidate, otherSeances)
 
     if (conflicts.length > 0) {
@@ -666,7 +749,7 @@ export const appActions = {
     saveStore({
       ...currentStore,
       seances: currentStore.seances.map((item) =>
-        item.id === id ? candidate : item,
+        sameId(item.id, id) ? candidate : item,
       ),
     })
 
@@ -683,7 +766,7 @@ export const appActions = {
   },
 
   deleteSeance(id) {
-    const seance = currentStore.seances.find((item) => item.id === id)
+    const seance = currentStore.seances.find((item) => sameId(item.id, id))
 
     if (!seance) {
       return {
@@ -694,10 +777,14 @@ export const appActions = {
 
     saveStore({
       ...currentStore,
-      seances: currentStore.seances.filter((item) => item.id !== id),
-      pointages: currentStore.pointages.filter((item) => item.seanceId !== id),
-      cahiers: currentStore.cahiers.filter((item) => item.seanceId !== id),
-      vacations: currentStore.vacations.filter((item) => item.seanceId !== id),
+      seances: currentStore.seances.filter((item) => !sameId(item.id, id)),
+      pointages: currentStore.pointages.filter(
+        (item) => !sameId(item.seanceId, id),
+      ),
+      cahiers: currentStore.cahiers.filter((item) => !sameId(item.seanceId, id)),
+      vacations: currentStore.vacations.filter(
+        (item) => !sameId(item.seanceId, id),
+      ),
     })
 
     appActions.addActivity({
@@ -721,8 +808,8 @@ export const appActions = {
       }
     }
 
-    const existing = currentStore.pointages.find(
-      (item) => item.seanceId === seanceId,
+    const existing = currentStore.pointages.find((item) =>
+      sameId(item.seanceId, seanceId),
     )
 
     const pointage = {
@@ -742,7 +829,7 @@ export const appActions = {
           )
         : [...currentStore.pointages, pointage],
       seances: currentStore.seances.map((item) =>
-        item.id === seanceId ? { ...item, statut: 'realisee' } : item,
+        sameId(item.id, seanceId) ? { ...item, statut: 'realisee' } : item,
       ),
     })
 
@@ -768,23 +855,30 @@ export const appActions = {
       }
     }
 
-    const existing = currentStore.cahiers.find(
-      (item) => item.seanceId === seanceId,
+    const existing = currentStore.cahiers.find((item) =>
+      sameId(item.seanceId, seanceId),
     )
 
     const cahier = {
       id: existing?.id || `c-${Date.now()}`,
       seanceId,
-      titre: data.titre || '',
-      contenu: data.contenu || '',
-      travaux: data.travaux || '',
-      observation: data.observation || '',
-      statut: data.statut || existing?.statut || 'brouillon',
+      titre: data.titre ?? existing?.titre ?? '',
+      contenu: data.contenu ?? existing?.contenu ?? '',
+      travaux: data.travaux ?? existing?.travaux ?? '',
+      observation: data.observation ?? existing?.observation ?? '',
+      statut: data.statut ?? existing?.statut ?? 'brouillon',
       signatureDelegue:
         data.signatureDelegue ?? existing?.signatureDelegue ?? false,
       signatureEnseignant:
         data.signatureEnseignant ?? existing?.signatureEnseignant ?? false,
+      signatureDelegueImage:
+        data.signatureDelegueImage ?? existing?.signatureDelegueImage ?? '',
+      signatureEnseignantImage:
+        data.signatureEnseignantImage ??
+        existing?.signatureEnseignantImage ??
+        '',
       locked: data.locked ?? existing?.locked ?? false,
+      updatedAt: new Date().toISOString(),
     }
 
     saveStore({
@@ -809,8 +903,8 @@ export const appActions = {
   },
 
   signCahier(seanceId, role) {
-    const existing = currentStore.cahiers.find(
-      (item) => item.seanceId === seanceId,
+    const existing = currentStore.cahiers.find((item) =>
+      sameId(item.seanceId, seanceId),
     )
 
     if (!existing) {
@@ -820,7 +914,10 @@ export const appActions = {
       }
     }
 
-    const updates = { ...existing }
+    const updates = {
+      ...existing,
+      updatedAt: new Date().toISOString(),
+    }
 
     if (role === 'delegue') {
       updates.signatureDelegue = true
@@ -865,8 +962,8 @@ export const appActions = {
       }
     }
 
-    const existing = currentStore.vacations.find(
-      (item) => item.seanceId === seanceId,
+    const existing = currentStore.vacations.find((item) =>
+      sameId(item.seanceId, seanceId),
     )
 
     if (existing) {
@@ -891,6 +988,8 @@ export const appActions = {
       retenue,
       montantNet,
       statut: 'en_attente',
+      createdAt: new Date().toISOString(),
+      updatedAt: '',
     }
 
     saveStore({
@@ -925,7 +1024,13 @@ export const appActions = {
     saveStore({
       ...currentStore,
       vacations: currentStore.vacations.map((item) =>
-        item.id === vacationId ? { ...item, statut } : item,
+        item.id === vacationId
+          ? {
+              ...item,
+              statut,
+              updatedAt: new Date().toISOString(),
+            }
+          : item,
       ),
     })
 
@@ -939,6 +1044,116 @@ export const appActions = {
       success: true,
     }
   },
+}
+
+function normalizeBackendSeance(seance) {
+  if (!seance) return null
+
+  return normalizeLocalSeance({
+    id: Number(seance.id),
+    weekKey: seance.weekKey || seance.week_key || DEFAULT_WEEK_KEY,
+    classe: seance.classe || '',
+    matiere: seance.matiere || '',
+    enseignant: seance.enseignant || '',
+    enseignant_email: seance.enseignant_email || '',
+    salle: seance.salle || '',
+    jour: seance.jour || 'Lundi',
+    horaire: seance.horaire || '',
+    type: seance.type || 'cours',
+    groupe: seance.groupe || null,
+    statut: seance.statut || 'planifiee',
+    createdBy: 'backend',
+  })
+}
+
+function normalizeLocalSeance(seance) {
+  if (!seance) return null
+
+  return {
+    id: seance.id,
+    weekKey: seance.weekKey || seance.week_key || DEFAULT_WEEK_KEY,
+    classe: seance.classe || '',
+    matiere: seance.matiere || '',
+    enseignant: seance.enseignant || '',
+    enseignant_email: seance.enseignant_email || '',
+    salle: seance.salle || '',
+    jour: seance.jour || 'Lundi',
+    horaire: normalizeSlot(seance.horaire || ''),
+    type: seance.type || 'cours',
+    groupe: seance.groupe || null,
+    statut: seance.statut || 'planifiee',
+    createdBy: seance.createdBy || 'local',
+  }
+}
+
+function normalizeSeanceArray(value, fallback = []) {
+  if (!Array.isArray(value)) return fallback
+
+  return value.map((item) => normalizeLocalSeance(item)).filter(Boolean)
+}
+
+function normalizePointageArray(value, fallback = []) {
+  if (!Array.isArray(value)) return fallback
+
+  return value.map((item) => ({
+    id: item.id || `p-${Date.now()}-${Math.random()}`,
+    seanceId:
+      item.seanceId || item.seance_id || item.creneauId || item.creneau_id,
+    date: item.date || getTodayIsoDate(),
+    statut: item.statut || item.status || 'present',
+    heureScan: item.heureScan || item.scanned_at || item.created_at || '',
+    validePar: item.validePar || item.validateur || '',
+  }))
+}
+
+function normalizeCahierArray(value, fallback = []) {
+  if (!Array.isArray(value)) return fallback
+
+  return value.map((item) => ({
+    id: item.id || `c-${Date.now()}-${Math.random()}`,
+    seanceId: item.seanceId || item.seance_id || item.creneau_id,
+    titre: item.titre || '',
+    contenu: item.contenu || '',
+    travaux: item.travaux || '',
+    observation: item.observation || '',
+    statut: item.statut || 'brouillon',
+    signatureDelegue: Boolean(item.signatureDelegue),
+    signatureEnseignant: Boolean(item.signatureEnseignant),
+    signatureDelegueImage: item.signatureDelegueImage || '',
+    signatureEnseignantImage: item.signatureEnseignantImage || '',
+    locked: Boolean(item.locked),
+    updatedAt: item.updatedAt || '',
+  }))
+}
+
+function normalizeVacationArray(value, fallback = []) {
+  if (!Array.isArray(value)) return fallback
+
+  return value.map((item) => ({
+    id: item.id || `v-${Date.now()}-${Math.random()}`,
+    enseignant: item.enseignant || '',
+    seanceId: item.seanceId || item.seance_id || item.creneau_id,
+    heures: Number(item.heures || 0),
+    tauxHoraire: Number(item.tauxHoraire || 0),
+    montantBrut: Number(item.montantBrut || 0),
+    retenue: Number(item.retenue || 0),
+    montantNet: Number(item.montantNet || 0),
+    statut: item.statut || 'en_attente',
+    createdAt: item.createdAt || '',
+    updatedAt: item.updatedAt || '',
+  }))
+}
+
+function normalizeActivityArray(value, fallback = []) {
+  if (!Array.isArray(value)) return fallback
+
+  return value.map((item) => ({
+    id: item.id || `a-${Date.now()}-${Math.random()}`,
+    type: item.type || 'info',
+    title: item.title || 'Activité',
+    text: item.text || '',
+    date: item.date || new Date().toISOString(),
+  }))
 }
 
 export function getScheduleConflicts(candidate, existingItems) {
@@ -1005,13 +1220,7 @@ export function slotsOverlap(slotA, slotB) {
 }
 
 export function parseSlot(slot = '') {
-  const normalized = slot
-    .toString()
-    .toLowerCase()
-    .replace(/\s+/g, '')
-    .replace(/à/g, '-')
-    .replace(/:/g, 'h')
-
+  const normalized = normalizeSlot(slot)
   const parts = normalized.split('-')
 
   if (parts.length !== 2) return null
@@ -1020,28 +1229,34 @@ export function parseSlot(slot = '') {
   const end = parseTime(parts[1])
 
   if (start === null || end === null) return null
+  if (end <= start) return null
 
   return { start, end }
 }
 
 export function parseTime(value = '') {
-  const match = value.match(/^(\d{1,2})h(\d{0,2})$/)
+  const match = String(value).match(/^(\d{1,2})h(\d{0,2})$/)
 
   if (!match) return null
 
   const hours = Number(match[1])
   const minutes = match[2] ? Number(match[2]) : 0
 
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null
+  if (hours > 23 || minutes > 59) return null
+
   return hours * 60 + minutes
 }
 
 export function normalizeSlot(value = '') {
-  return value
-    .toString()
+  return String(value || '')
     .toLowerCase()
     .replace(/\s+/g, '')
     .replace(/à/g, '-')
+    .replace(/–/g, '-')
+    .replace(/—/g, '-')
     .replace(/:/g, 'h')
+    .replace(/H/g, 'h')
 }
 
 export function sortSlots(a, b) {
@@ -1054,11 +1269,24 @@ export function sortSlots(a, b) {
 }
 
 export function formatSlot(slot = '') {
-  return slot
-    .replace('-', ' à ')
-    .replace('10h00', '10h')
-    .replace('13h00', '13h')
-    .replace('15h00', '15h')
+  const parsed = parseSlot(slot)
+
+  if (!parsed) {
+    return String(slot || '').replace('-', ' à ')
+  }
+
+  return `${formatMinute(parsed.start)} à ${formatMinute(parsed.end)}`
+}
+
+function formatMinute(totalMinutes) {
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+
+  if (minutes === 0) {
+    return `${String(hours).padStart(2, '0')}h`
+  }
+
+  return `${String(hours).padStart(2, '0')}h${String(minutes).padStart(2, '0')}`
 }
 
 export function formatMoney(value) {
@@ -1139,6 +1367,10 @@ function formatShortDate(date) {
     month: 'long',
     year: 'numeric',
   })
+}
+
+function sameId(a, b) {
+  return String(a) === String(b) || Number(a) === Number(b)
 }
 
 export function getTeacherNameFromUser(user) {

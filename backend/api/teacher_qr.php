@@ -6,6 +6,8 @@ date_default_timezone_set("Africa/Ouagadougou");
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Headers: Content-Type, Authorization");
 header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Pragma: no-cache");
 
 if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
     http_response_code(200);
@@ -84,18 +86,27 @@ function ensure_tables($pdo) {
             INDEX (creneau_id),
             INDEX (enseignant_id),
             INDEX (date_cours),
-            INDEX (statut)
+            INDEX (statut),
+            INDEX (scanned_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ");
 
-    // Si la table existait déjà avec ENUM('present','retard'), on l’élargit pour ajouter absent.
     try {
         $pdo->exec("
             ALTER TABLE presences_professeurs
             MODIFY statut ENUM('present', 'retard', 'absent') NOT NULL DEFAULT 'present'
         ");
     } catch (Throwable $e) {
-        // On ignore si MySQL dit que la modification est déjà appliquée.
+        // Déjà appliqué.
+    }
+
+    try {
+        $pdo->exec("
+            ALTER TABLE presences_professeurs
+            ADD INDEX scanned_at (scanned_at)
+        ");
+    } catch (Throwable $e) {
+        // Index déjà existant.
     }
 }
 
@@ -405,7 +416,61 @@ function get_scan_status($dateCours, $horaireLabel) {
 }
 
 /* ============================================================
-   LISTE DES DONNÉES POUR REACT
+   REQUÊTES HISTORIQUE
+   ============================================================ */
+
+function get_presences($pdo, $limit = 300) {
+    $limit = max(10, min((int)$limit, 500));
+
+    $stmt = $pdo->prepare("
+        SELECT
+            p.id,
+            p.token_id,
+            p.creneau_id,
+            p.creneau_id AS seanceId,
+            p.creneau_id AS seance_id,
+            p.enseignant_id,
+            p.date_cours,
+            p.statut,
+            p.scanned_at,
+            p.device_info,
+            cl.nom AS classe,
+            m.nom AS matiere,
+            CONCAT(e.nom, ' ', e.prenom) AS enseignant,
+            e.email AS enseignant_email,
+            s.nom AS salle,
+            h.label AS horaire,
+            c.jour
+        FROM presences_professeurs p
+        JOIN creneaux c ON c.id = p.creneau_id
+        JOIN classes cl ON cl.id = c.classe_id
+        JOIN matieres m ON m.id = c.matiere_id
+        JOIN enseignants e ON e.id = c.enseignant_id
+        JOIN salles s ON s.id = c.salle_id
+        JOIN horaires h ON h.id = c.horaire_id
+        ORDER BY p.scanned_at DESC
+        LIMIT {$limit}
+    ");
+
+    $stmt->execute();
+
+    return $stmt->fetchAll();
+}
+
+function history_data($pdo) {
+    ensure_tables($pdo);
+
+    $limit = (int)($_GET["limit"] ?? 300);
+    $presences = get_presences($pdo, $limit);
+
+    json_response(true, "Historique chargé.", [
+        "presences" => $presences,
+        "updated_at" => date("Y-m-d H:i:s")
+    ]);
+}
+
+/* ============================================================
+   LISTE COMPLÈTE POUR REACT
    ============================================================ */
 
 function list_data($pdo) {
@@ -458,32 +523,7 @@ function list_data($pdo) {
         ORDER BY nom, prenom
     ")->fetchAll();
 
-    $presences = $pdo->query("
-        SELECT
-            p.id,
-            p.token_id,
-            p.creneau_id,
-            p.enseignant_id,
-            p.date_cours,
-            p.statut,
-            p.scanned_at,
-            cl.nom AS classe,
-            m.nom AS matiere,
-            CONCAT(e.nom, ' ', e.prenom) AS enseignant,
-            e.email AS enseignant_email,
-            s.nom AS salle,
-            h.label AS horaire,
-            c.jour
-        FROM presences_professeurs p
-        JOIN creneaux c ON c.id = p.creneau_id
-        JOIN classes cl ON cl.id = c.classe_id
-        JOIN matieres m ON m.id = c.matiere_id
-        JOIN enseignants e ON e.id = c.enseignant_id
-        JOIN salles s ON s.id = c.salle_id
-        JOIN horaires h ON h.id = c.horaire_id
-        ORDER BY p.scanned_at DESC
-        LIMIT 300
-    ")->fetchAll();
+    $presences = get_presences($pdo, 300);
 
     $tokens = $pdo->query("
         SELECT
@@ -620,6 +660,7 @@ function manual_pointage($pdo) {
 
     $now = new DateTime("now", new DateTimeZone("Africa/Ouagadougou"));
     $deviceInfo = "Pointage manuel";
+
     if ($createdBy !== "") {
         $deviceInfo .= " par " . $createdBy;
     }
@@ -646,8 +687,23 @@ function manual_pointage($pdo) {
             ":device_info" => $deviceInfo
         ]);
 
+        $presence = null;
+        $presenceRows = get_presences($pdo, 1);
+
+        foreach ($presenceRows as $row) {
+            if (
+                (int)$row["creneau_id"] === (int)$creneauId &&
+                (int)$row["enseignant_id"] === (int)$creneau["enseignant_id"] &&
+                $row["date_cours"] === $dateCours
+            ) {
+                $presence = $row;
+                break;
+            }
+        }
+
         json_response(true, "Pointage manuel enregistré.", [
             "creneau" => $creneau,
+            "presence" => $presence,
             "date_cours" => $dateCours,
             "statut" => $statut,
             "scanned_at" => $now->format("Y-m-d H:i:s")
@@ -961,6 +1017,10 @@ try {
     }
 
     $pdo = db();
+
+    if ($action === "history") {
+        history_data($pdo);
+    }
 
     if ($action === "list") {
         list_data($pdo);

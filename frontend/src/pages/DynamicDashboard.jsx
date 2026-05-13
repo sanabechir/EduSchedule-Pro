@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import './DynamicDashboard.css'
 import {
   DEFAULT_WEEK_KEY,
@@ -8,6 +8,17 @@ import {
   useAppStore,
 } from '../services/appStore'
 import { getClassNameFromUser, getTeacherNameFromUser } from '../services/userScope'
+import { getHolidayForWeekDay } from '../services/burkinaHolidays'
+import {
+  canViewCahierTexte,
+  canViewEmploiTemps,
+  canViewPointage,
+  canViewRapports,
+  canViewVacations,
+  getRoleLabel,
+} from '../services/permissions'
+
+const API_BASE = 'http://127.0.0.1/EduSchedule-Pro/backend/api'
 
 const PAGE_TARGETS = {
   dashboard: 'dashboard',
@@ -24,52 +35,201 @@ function DynamicDashboard({ user, setPage }) {
   const role = user?.role || 'admin'
   const teacherName = getTeacherNameFromUser(user)
   const delegateClass = getClassNameFromUser(user)
+
+  const [selectedWeek, setSelectedWeek] = useState(DEFAULT_WEEK_KEY)
+  const [backendSeances, setBackendSeances] = useState([])
+  const [backendPointages, setBackendPointages] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [message, setMessage] = useState('')
+
+  const canGoSchedule = canViewEmploiTemps(user)
+  const canGoQr = canViewPointage(user)
+  const canGoCahier = canViewCahierTexte(user)
+  const canGoVacations = canViewVacations(user)
+  const canGoReports = canViewRapports(user)
+
   const week =
-    WEEK_OPTIONS.find((item) => item.key === DEFAULT_WEEK_KEY) ||
-    WEEK_OPTIONS[0]
+    WEEK_OPTIONS.find((item) => item.key === selectedWeek) || WEEK_OPTIONS[0]
+
+  const allCahiers = store.cahiers || []
+  const allVacations = store.vacations || []
+  const allActivities = store.activities || []
+
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true)
+      setMessage('')
+
+      const scheduleRes = await fetch(
+        `${API_BASE}/schedule.php?action=list&week=${encodeURIComponent(
+          selectedWeek,
+        )}`,
+        {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+          },
+        },
+      )
+
+      const scheduleText = await scheduleRes.text()
+
+      let scheduleJson
+
+      try {
+        scheduleJson = JSON.parse(scheduleText)
+      } catch {
+        throw new Error(
+          `Réponse schedule.php invalide : ${scheduleText.slice(0, 180)}`,
+        )
+      }
+
+      if (!scheduleJson.success) {
+        throw new Error(scheduleJson.message || 'Impossible de charger les cours.')
+      }
+
+      setBackendSeances(scheduleJson.data?.seances || [])
+
+      try {
+        const qrRes = await fetch(`${API_BASE}/teacher_qr.php?action=list`, {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+          },
+        })
+
+        const qrText = await qrRes.text()
+        const qrJson = JSON.parse(qrText)
+
+        if (qrJson.success) {
+          setBackendPointages(qrJson.data?.presences || [])
+        } else {
+          setBackendPointages([])
+        }
+      } catch {
+        setBackendPointages([])
+      }
+    } catch (err) {
+      setMessage(err.message || 'Erreur lors du chargement du Dashboard.')
+      setBackendSeances([])
+      setBackendPointages([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadDashboardData()
+  }, [selectedWeek])
 
   const goTo = (target) => {
     if (!setPage) return
 
     const page = PAGE_TARGETS[target] || target
 
-    setPage(page)
+    const allowedPages = {
+      dashboard: true,
+      emploi: canGoSchedule,
+      qr: canGoQr,
+      cahier: canGoCahier,
+      vacations: canGoVacations,
+      rapports: canGoReports,
+    }
+
+    if (allowedPages[page]) {
+      setPage(page)
+    }
   }
 
-  const scopedSeances = useMemo(() => {
-    return store.seances
-      .filter((seance) => seance.weekKey === DEFAULT_WEEK_KEY)
-      .filter((seance) => {
-        if (role === 'enseignant' && teacherName) {
-          return seance.enseignant === teacherName
-        }
+  const weeklyProgrammedSeances = useMemo(() => {
+    return backendSeances.filter((seance) => {
+      if (role === 'enseignant' && teacherName) {
+        return (
+          seance.enseignant === teacherName ||
+          seance.enseignant_email === user?.email
+        )
+      }
 
-        if (role === 'delegue' && delegateClass) {
-          return seance.classe === delegateClass
-        }
+      if (role === 'delegue' && delegateClass) {
+        return seance.classe === delegateClass
+      }
 
-        return true
-      })
-  }, [store.seances, role, teacherName, delegateClass])
+      if (role === 'comptable') {
+        return allVacations.some((vacation) => {
+          return sameId(vacation.seanceId, seance.id)
+        })
+      }
 
-  const scopedCahiers = useMemo(() => {
-    const seanceIds = scopedSeances.map((item) => item.id)
+      return true
+    })
+  }, [
+    backendSeances,
+    allVacations,
+    role,
+    teacherName,
+    delegateClass,
+    user?.email,
+  ])
 
-    return store.cahiers.filter((cahier) => seanceIds.includes(cahier.seanceId))
-  }, [store.cahiers, scopedSeances])
+  const holidaySeances = useMemo(() => {
+    return weeklyProgrammedSeances.filter((seance) => {
+      const dayIndex = week.days.findIndex((day) => day.key === seance.jour)
+
+      if (dayIndex < 0) return false
+
+      const holiday = getHolidayForWeekDay(week, selectedWeek, dayIndex)
+
+      return Boolean(holiday)
+    })
+  }, [weeklyProgrammedSeances, week, selectedWeek])
+
+  const effectiveSeances = useMemo(() => {
+    return weeklyProgrammedSeances.filter((seance) => {
+      const dayIndex = week.days.findIndex((day) => day.key === seance.jour)
+
+      if (dayIndex < 0) return true
+
+      const holiday = getHolidayForWeekDay(week, selectedWeek, dayIndex)
+
+      return !holiday
+    })
+  }, [weeklyProgrammedSeances, week, selectedWeek])
 
   const scopedPointages = useMemo(() => {
-    const seanceIds = scopedSeances.map((item) => item.id)
+    const effectiveSeanceIds = effectiveSeances.map((item) => Number(item.id))
 
-    return store.pointages.filter((pointage) =>
-      seanceIds.includes(pointage.seanceId),
-    )
-  }, [store.pointages, scopedSeances])
+    return backendPointages
+      .map((pointage) => ({
+        ...pointage,
+        seanceId:
+          pointage.seanceId ||
+          pointage.seance_id ||
+          pointage.creneauId ||
+          pointage.creneau_id,
+        statut: pointage.statut || pointage.status || 'present',
+        heureScan:
+          pointage.heureScan ||
+          pointage.scanned_at ||
+          pointage.created_at ||
+          '',
+      }))
+      .filter((pointage) => effectiveSeanceIds.includes(Number(pointage.seanceId)))
+  }, [backendPointages, effectiveSeances])
+
+  const scopedCahiers = useMemo(() => {
+    const effectiveSeanceIds = effectiveSeances.map((item) => Number(item.id))
+
+    return allCahiers.filter((cahier) => {
+      return effectiveSeanceIds.includes(Number(cahier.seanceId))
+    })
+  }, [allCahiers, effectiveSeances])
 
   const scopedVacations = useMemo(() => {
-    return store.vacations
+    return allVacations
       .map((vacation) => {
-        const seance = store.seances.find((item) => item.id === vacation.seanceId)
+        const seance = backendSeances.find((item) => {
+          return sameId(item.id, vacation.seanceId)
+        })
 
         return {
           ...vacation,
@@ -78,29 +238,51 @@ function DynamicDashboard({ user, setPage }) {
       })
       .filter((vacation) => vacation.seance)
       .filter((vacation) => {
+        const dayIndex = week.days.findIndex(
+          (day) => day.key === vacation.seance?.jour,
+        )
+
+        if (dayIndex < 0) return true
+
+        const holiday = getHolidayForWeekDay(week, selectedWeek, dayIndex)
+
+        return !holiday
+      })
+      .filter((vacation) => {
         if (role === 'enseignant' && teacherName) {
           return vacation.enseignant === teacherName
         }
 
+        if (role === 'delegue') {
+          return false
+        }
+
         return true
       })
-  }, [store.vacations, store.seances, role, teacherName])
+  }, [
+    allVacations,
+    backendSeances,
+    week,
+    selectedWeek,
+    role,
+    teacherName,
+  ])
 
   const stats = useMemo(() => {
     const classes = new Set(
-      scopedSeances.map((item) => item.classe).filter(Boolean),
+      effectiveSeances.map((item) => item.classe).filter(Boolean),
     )
 
     const enseignants = new Set(
-      scopedSeances.map((item) => item.enseignant).filter(Boolean),
+      effectiveSeances.map((item) => item.enseignant).filter(Boolean),
     )
 
     const matieres = new Set(
-      scopedSeances.map((item) => item.matiere).filter(Boolean),
+      effectiveSeances.map((item) => item.matiere).filter(Boolean),
     )
 
     const salles = new Set(
-      scopedSeances.map((item) => item.salle).filter(Boolean),
+      effectiveSeances.map((item) => item.salle).filter(Boolean),
     )
 
     const presents = scopedPointages.filter((item) => item.statut === 'present')
@@ -112,16 +294,39 @@ function DynamicDashboard({ user, setPage }) {
     const absents = scopedPointages.filter((item) => item.statut === 'absent')
       .length
 
+    const pointagesValides = scopedPointages.filter((item) =>
+      ['present', 'retard'].includes(item.statut),
+    ).length
+
     const cahiersSignesDelegue = scopedCahiers.filter(
       (item) => item.signatureDelegue,
     ).length
 
+    const cahiersSignesEnseignant = scopedCahiers.filter(
+      (item) => item.signatureEnseignant,
+    ).length
+
     const cahiersClotures = scopedCahiers.filter((item) => item.locked).length
+
+    const cahiersOuverts = scopedCahiers.filter((item) => !item.locked).length
+
+    const cahiersACompleter = Math.max(
+      0,
+      effectiveSeances.length - scopedCahiers.length,
+    )
 
     const vacationsTotal = scopedVacations.length
 
+    const vacationsValidees = scopedVacations.filter((item) =>
+      ['validee', 'payee'].includes(item.statut),
+    ).length
+
     const vacationsPayees = scopedVacations.filter(
       (item) => item.statut === 'payee',
+    ).length
+
+    const vacationsEnAttente = scopedVacations.filter(
+      (item) => item.statut !== 'payee',
     ).length
 
     const vacationsMontant = scopedVacations.reduce(
@@ -129,40 +334,123 @@ function DynamicDashboard({ user, setPage }) {
       0,
     )
 
+    const tauxPresence =
+      scopedPointages.length > 0
+        ? Math.round((presents / scopedPointages.length) * 100)
+        : 0
+
+    const tauxRealisation =
+      effectiveSeances.length > 0
+        ? Math.round((pointagesValides / effectiveSeances.length) * 100)
+        : 0
+
+    const tauxCahiers =
+      effectiveSeances.length > 0
+        ? Math.round((cahiersClotures / effectiveSeances.length) * 100)
+        : 0
+
     return {
       classes: classes.size,
       enseignants: enseignants.size,
       matieres: matieres.size,
       salles: salles.size,
-      seances: scopedSeances.length,
+
+      coursProgrammes: weeklyProgrammedSeances.length,
+      coursEffectifs: effectiveSeances.length,
+      coursNeutralises: holidaySeances.length,
+
       pointages: scopedPointages.length,
+      pointagesValides,
       presents,
       retards,
       absents,
+
+      tauxPresence,
+      tauxRealisation,
+      tauxCahiers,
+
       cahiers: scopedCahiers.length,
       cahiersSignesDelegue,
+      cahiersSignesEnseignant,
       cahiersClotures,
+      cahiersOuverts,
+      cahiersACompleter,
+
       vacationsTotal,
+      vacationsValidees,
       vacationsPayees,
+      vacationsEnAttente,
       vacationsMontant,
     }
-  }, [scopedSeances, scopedPointages, scopedCahiers, scopedVacations])
+  }, [
+    weeklyProgrammedSeances,
+    effectiveSeances,
+    holidaySeances,
+    scopedPointages,
+    scopedCahiers,
+    scopedVacations,
+  ])
 
   const chartData = useMemo(() => {
-    return week.days.map((day) => {
-      const count = scopedSeances.filter((seance) => seance.jour === day.key)
-        .length
+    return week.days.map((day, dayIndex) => {
+      const holiday = getHolidayForWeekDay(week, selectedWeek, dayIndex)
+
+      const programmed = weeklyProgrammedSeances.filter((seance) => {
+        return seance.jour === day.key
+      })
+
+      const effective = holiday
+        ? []
+        : effectiveSeances.filter((seance) => seance.jour === day.key)
+
+      const pointages = scopedPointages.filter((pointage) => {
+        const seance = effectiveSeances.find((item) => {
+          return sameId(item.id, pointage.seanceId)
+        })
+
+        return seance?.jour === day.key
+      })
+
+      const cahiers = scopedCahiers.filter((cahier) => {
+        const seance = effectiveSeances.find((item) => {
+          return sameId(item.id, cahier.seanceId)
+        })
+
+        return seance?.jour === day.key
+      })
 
       return {
         label: day.short || day.label.slice(0, 3),
-        value: count,
+        day: day.label,
+        programmed: programmed.length,
+        effective: effective.length,
+        neutralized: holiday ? programmed.length : 0,
+        pointages: pointages.length,
+        cahiers: cahiers.length,
+        holiday: holiday?.name || '',
       }
     })
-  }, [scopedSeances, week.days])
+  }, [
+    week,
+    selectedWeek,
+    weeklyProgrammedSeances,
+    effectiveSeances,
+    scopedPointages,
+    scopedCahiers,
+  ])
+
+  const maxChartValue = useMemo(() => {
+    return Math.max(
+      1,
+      ...chartData.map((item) => Math.max(item.programmed, item.effective)),
+    )
+  }, [chartData])
 
   const activities = useMemo(() => {
     const pointageActivities = scopedPointages.map((pointage) => {
-      const seance = scopedSeances.find((item) => item.id === pointage.seanceId)
+      const seance = effectiveSeances.find((item) =>
+        sameId(item.id, pointage.seanceId),
+      )
 
       return {
         id: `pointage-${pointage.id || pointage.seanceId}`,
@@ -185,7 +473,9 @@ function DynamicDashboard({ user, setPage }) {
     })
 
     const cahierActivities = scopedCahiers.map((cahier) => {
-      const seance = scopedSeances.find((item) => item.id === cahier.seanceId)
+      const seance = effectiveSeances.find((item) =>
+        sameId(item.id, cahier.seanceId),
+      )
 
       return {
         id: `cahier-${cahier.id || cahier.seanceId}`,
@@ -217,16 +507,47 @@ function DynamicDashboard({ user, setPage }) {
       }
     })
 
+    const holidayActivities = holidaySeances.slice(0, 4).map((seance) => ({
+      id: `holiday-${seance.id}`,
+      type: 'JF',
+      title: 'Cours neutralisé par jour férié',
+      text: `${seance.matiere} - ${seance.classe} - ${seance.jour}`,
+    }))
+
+    const externalActivities = allActivities.map((activity, index) => ({
+      id: `activity-${index}`,
+      type: activity.type === 'alerte' ? 'AN' : 'AC',
+      title: activity.title || 'Activité',
+      text: activity.text || '',
+    }))
+
+    if (role === 'comptable') {
+      return [...vacationActivities, ...externalActivities].slice(-6).reverse()
+    }
+
+    if (role === 'delegue') {
+      return [...holidayActivities, ...pointageActivities, ...cahierActivities]
+        .slice(-6)
+        .reverse()
+    }
+
+    if (role === 'enseignant') {
+      return [
+        ...holidayActivities,
+        ...pointageActivities,
+        ...cahierActivities,
+        ...vacationActivities,
+      ]
+        .slice(-6)
+        .reverse()
+    }
+
     return [
+      ...holidayActivities,
       ...pointageActivities,
       ...cahierActivities,
       ...vacationActivities,
-      ...(store.activities || []).map((activity, index) => ({
-        id: `activity-${index}`,
-        type: activity.type === 'alerte' ? 'AN' : 'AC',
-        title: activity.title || 'Activité',
-        text: activity.text || '',
-      })),
+      ...externalActivities,
     ]
       .slice(-6)
       .reverse()
@@ -234,11 +555,69 @@ function DynamicDashboard({ user, setPage }) {
     scopedPointages,
     scopedCahiers,
     scopedVacations,
-    scopedSeances,
-    store.activities,
+    effectiveSeances,
+    holidaySeances,
+    allActivities,
+    role,
   ])
 
+  const nextItems = useMemo(() => {
+    if (role === 'comptable') {
+      return scopedVacations.slice(0, 5).map((vacation) => ({
+        id: vacation.id,
+        icon: 'FV',
+        title: vacation.enseignant,
+        main: `${vacation.seance?.matiere || 'Vacation'} • ${
+          vacation.seance?.classe || '—'
+        }`,
+        sub: `${formatMoney(vacation.montantNet)} — ${formatVacationStatus(
+          vacation.statut,
+        )}`,
+      }))
+    }
+
+    if (role === 'surveillant') {
+      return effectiveSeances.slice(0, 5).map((seance) => {
+        const pointage = scopedPointages.find((item) =>
+          sameId(item.seanceId, seance.id),
+        )
+
+        const cahier = scopedCahiers.find((item) =>
+          sameId(item.seanceId, seance.id),
+        )
+
+        return {
+          id: seance.id,
+          icon: 'CT',
+          title: seance.matiere,
+          main: `${seance.classe} • ${seance.jour} • ${formatSlot(
+            seance.horaire,
+          )}`,
+          sub: `${pointage ? formatPointage(pointage.statut) : 'Non pointé'} — ${
+            cahier?.locked ? 'Cahier clôturé' : 'Cahier à contrôler'
+          }`,
+        }
+      })
+    }
+
+    return effectiveSeances.slice(0, 5).map((seance) => ({
+      id: seance.id,
+      icon: 'ET',
+      title: seance.matiere,
+      main: `${seance.classe} • ${seance.jour} • ${formatSlot(seance.horaire)}`,
+      sub: `${seance.enseignant} — ${seance.salle}`,
+    }))
+  }, [role, effectiveSeances, scopedVacations, scopedPointages, scopedCahiers])
+
   const roleConfig = getRoleConfig(role)
+
+  const primaryTargetIsAllowed = isTargetAllowed(roleConfig.primaryTarget, {
+    canGoSchedule,
+    canGoQr,
+    canGoCahier,
+    canGoVacations,
+    canGoReports,
+  })
 
   return (
     <div className="page dynamic-dashboard">
@@ -249,23 +628,47 @@ function DynamicDashboard({ user, setPage }) {
           <p>{roleConfig.description}</p>
         </div>
 
-        <button
-          type="button"
-          className="primary-btn"
-          onClick={() => goTo(roleConfig.primaryTarget)}
-        >
-          {roleConfig.primaryAction}
-        </button>
+        {primaryTargetIsAllowed && (
+          <button
+            type="button"
+            className="primary-btn"
+            onClick={() => goTo(roleConfig.primaryTarget)}
+          >
+            {roleConfig.primaryAction}
+          </button>
+        )}
       </div>
 
       <div className="dashboard-scope-note">
         <div>
-          <strong>{getRoleLabel(role)}</strong>
+          <strong>{getRoleLabel(user)}</strong>
           <span>{getScopeText(role, teacherName, delegateClass)}</span>
         </div>
 
-        <small>Semaine active : {week.label}</small>
+        <div className="dashboard-week-select">
+          <label>Semaine active</label>
+          <select
+            value={selectedWeek}
+            onChange={(e) => {
+              setSelectedWeek(e.target.value)
+            }}
+          >
+            {WEEK_OPTIONS.map((item) => (
+              <option key={item.key} value={item.key}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
+
+      {loading && (
+        <div className="dashboard-message">
+          Chargement des données de la semaine...
+        </div>
+      )}
+
+      {message && <div className="dashboard-message error">{message}</div>}
 
       <div className="stats-grid">
         {getStatCards(role, stats).map((card) => (
@@ -279,44 +682,126 @@ function DynamicDashboard({ user, setPage }) {
         ))}
       </div>
 
+      <section className="panel dashboard-kpi-panel">
+        <div className="dashboard-kpi-grid">
+          <MiniStat label="Cours programmés" value={stats.coursProgrammes} />
+          <MiniStat label="Cours effectifs" value={stats.coursEffectifs} />
+          <MiniStat label="Neutralisés fériés" value={stats.coursNeutralises} />
+          <MiniStat label="Taux réalisation" value={`${stats.tauxRealisation}%`} />
+          <MiniStat label="Pointages" value={stats.pointages} />
+          <MiniStat label="Cahiers clôturés" value={stats.cahiersClotures} />
+        </div>
+      </section>
+
       <div className="dashboard-grid">
         <section className="panel dashboard-chart-panel">
           <div className="panel-header">
-            <h3>Évolution des séances</h3>
-            <span className="dashboard-week-badge">Cette semaine</span>
+            <h3>
+              {role === 'comptable'
+                ? 'Activité financière'
+                : 'Cours programmés / effectifs'}
+            </h3>
+            <span className="dashboard-week-badge">Semaine sélectionnée</span>
           </div>
 
-          <div className="dashboard-bars">
-            {chartData.map((item) => (
-              <div key={item.label} className="dashboard-bar-item">
-                <div className="dashboard-bar-track">
-                  <div
-                    className="dashboard-bar-fill"
-                    style={{
-                      height: `${Math.max(12, item.value * 22)}px`,
-                    }}
-                  />
-                </div>
-
-                <strong>{item.value}</strong>
-                <span>{item.label}</span>
+          {role === 'comptable' ? (
+            <div className="dashboard-finance-box">
+              <div>
+                <span>Montant total net</span>
+                <strong>{formatMoney(stats.vacationsMontant)}</strong>
               </div>
-            ))}
-          </div>
 
-          <div className="dashboard-mini-stats">
-            <MiniStat label="Séances" value={stats.seances} />
-            <MiniStat label="Pointages" value={stats.pointages} />
-            <MiniStat label="Cahiers clôturés" value={stats.cahiersClotures} />
-          </div>
+              <div>
+                <span>Fiches validées</span>
+                <strong>{stats.vacationsValidees}</strong>
+              </div>
+
+              <div>
+                <span>Fiches payées</span>
+                <strong>{stats.vacationsPayees}</strong>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="dashboard-bars dual">
+                {chartData.map((item) => {
+                  const programmedHeight =
+                    item.programmed > 0
+                      ? `${Math.max(
+                          18,
+                          (item.programmed / maxChartValue) * 160,
+                        )}px`
+                      : '0px'
+
+                  const effectiveHeight =
+                    item.effective > 0
+                      ? `${Math.max(
+                          18,
+                          (item.effective / maxChartValue) * 160,
+                        )}px`
+                      : '0px'
+
+                  return (
+                    <div
+                      key={item.label}
+                      className={
+                        item.holiday
+                          ? 'dashboard-bar-item holiday'
+                          : 'dashboard-bar-item'
+                      }
+                      title={
+                        item.holiday
+                          ? `${item.day} férié : ${item.holiday}. ${item.programmed} cours programmé(s), ${item.neutralized} neutralisé(s).`
+                          : `${item.day} : ${item.effective} cours effectif(s) sur ${item.programmed} programmé(s).`
+                      }
+                    >
+                      <div className="dashboard-dual-track">
+                        <div
+                          className="dashboard-programmed-bar"
+                          style={{ height: programmedHeight }}
+                        />
+
+                        <div
+                          className="dashboard-effective-bar"
+                          style={{ height: effectiveHeight }}
+                        />
+                      </div>
+
+                      <strong>{item.effective}</strong>
+                      <span>{item.label}</span>
+
+                      {item.holiday ? (
+                        <small className="dashboard-bar-note">
+                          {item.programmed} prévu(s) · férié
+                        </small>
+                      ) : (
+                        <small className="dashboard-bar-note normal">
+                          {item.programmed} prévu(s)
+                        </small>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="dashboard-mini-stats">
+                <MiniStat label="Programmés" value={stats.coursProgrammes} />
+                <MiniStat label="Effectifs" value={stats.coursEffectifs} />
+                <MiniStat label="Fériés" value={stats.coursNeutralises} />
+              </div>
+            </>
+          )}
         </section>
 
         <section className="panel dashboard-activity-panel">
           <div className="panel-header">
             <h3>Activités récentes</h3>
-            <button type="button" onClick={() => goTo('reports')}>
-              Voir tout
-            </button>
+
+            {canGoReports && (
+              <button type="button" onClick={() => goTo('reports')}>
+                Voir tout
+              </button>
+            )}
           </div>
 
           <div className="dashboard-activity-list">
@@ -343,31 +828,36 @@ function DynamicDashboard({ user, setPage }) {
       <section className="panel dashboard-next-panel">
         <div className="panel-header">
           <h3>{roleConfig.sectionTitle}</h3>
-          <button type="button" onClick={() => goTo('schedule')}>
-            Emploi complet
-          </button>
+
+          {canGoSchedule && role !== 'comptable' && (
+            <button type="button" onClick={() => goTo('schedule')}>
+              Emploi complet
+            </button>
+          )}
+
+          {canGoVacations && role === 'comptable' && (
+            <button type="button" onClick={() => goTo('vacations')}>
+              Voir vacations
+            </button>
+          )}
         </div>
 
         <div className="dashboard-next-list">
-          {scopedSeances.slice(0, 5).map((seance) => (
-            <div key={seance.id} className="dashboard-next-item">
-              <div className="activity-icon">ET</div>
+          {nextItems.map((item) => (
+            <div key={item.id} className="dashboard-next-item">
+              <div className="activity-icon">{item.icon}</div>
 
               <div>
-                <strong>{seance.matiere}</strong>
-                <span>
-                  {seance.classe} • {seance.jour} • {formatSlot(seance.horaire)}
-                </span>
-                <small>
-                  {seance.enseignant} — {seance.salle}
-                </small>
+                <strong>{item.title}</strong>
+                <span>{item.main}</span>
+                <small>{item.sub}</small>
               </div>
             </div>
           ))}
 
-          {scopedSeances.length === 0 && (
+          {nextItems.length === 0 && (
             <div className="dashboard-empty">
-              Aucune séance à afficher pour votre périmètre.
+              Aucune donnée effective à afficher pour votre périmètre.
             </div>
           )}
         </div>
@@ -403,22 +893,22 @@ function getStatCards(role, stats) {
   if (role === 'enseignant') {
     return [
       {
-        label: 'Mes séances',
-        value: stats.seances,
+        label: 'Mes cours',
+        value: stats.coursEffectifs,
         code: 'ET',
-        hint: 'Cette semaine',
+        hint: 'Effectifs',
       },
       {
         label: 'Présences',
         value: stats.presents,
         code: 'PR',
-        hint: 'Validées',
+        hint: `${stats.tauxPresence}%`,
       },
       {
         label: 'Cahiers clôturés',
         value: stats.cahiersClotures,
         code: 'CT',
-        hint: 'Signés',
+        hint: `${stats.tauxCahiers}%`,
       },
       {
         label: 'Vacations',
@@ -432,10 +922,10 @@ function getStatCards(role, stats) {
   if (role === 'delegue') {
     return [
       {
-        label: 'Séances classe',
-        value: stats.seances,
+        label: 'Cours classe',
+        value: stats.coursEffectifs,
         code: 'CL',
-        hint: 'Cette semaine',
+        hint: 'Effectifs',
       },
       {
         label: 'Pointages',
@@ -461,8 +951,8 @@ function getStatCards(role, stats) {
   if (role === 'surveillant') {
     return [
       {
-        label: 'Séances',
-        value: stats.seances,
+        label: 'Cours effectifs',
+        value: stats.coursEffectifs,
         code: 'SE',
         hint: 'À contrôler',
       },
@@ -479,10 +969,10 @@ function getStatCards(role, stats) {
         hint: 'À suivre',
       },
       {
-        label: 'Vacations',
-        value: stats.vacationsTotal,
-        code: 'FV',
-        hint: 'À viser',
+        label: 'Cahiers ouverts',
+        value: stats.cahiersOuverts,
+        code: 'CT',
+        hint: 'À contrôler',
       },
     ]
   }
@@ -518,28 +1008,28 @@ function getStatCards(role, stats) {
 
   return [
     {
-      label: 'Classes',
-      value: stats.classes,
-      code: 'CL',
-      hint: 'Classes actives',
+      label: 'Cours programmés',
+      value: stats.coursProgrammes,
+      code: 'CP',
+      hint: 'Semaine sélectionnée',
     },
     {
-      label: 'Enseignants',
-      value: stats.enseignants,
-      code: 'EN',
-      hint: 'Personnel disponible',
+      label: 'Cours effectifs',
+      value: stats.coursEffectifs,
+      code: 'CE',
+      hint: 'Hors fériés',
     },
     {
-      label: 'Matières',
-      value: stats.matieres,
-      code: 'MT',
-      hint: 'Modules actifs',
+      label: 'Neutralisés',
+      value: stats.coursNeutralises,
+      code: 'JF',
+      hint: 'Jours fériés',
     },
     {
-      label: 'Salles',
-      value: stats.salles,
-      code: 'SL',
-      hint: 'Salles utilisées',
+      label: 'Pointages',
+      value: stats.pointages,
+      code: 'QR',
+      hint: `${stats.tauxRealisation}% réalisés`,
     },
   ]
 }
@@ -550,37 +1040,37 @@ function getRoleConfig(role) {
       kicker: 'Vue globale',
       title: 'Bonjour, Administrateur',
       description:
-        'Vue globale sur la planification, les pointages, les cahiers et les vacations.',
+        'Vue globale de la semaine sélectionnée : cours programmés, jours fériés, pointages, cahiers et vacations.',
       primaryAction: '+ Nouvelle séance',
       primaryTarget: 'schedule',
-      sectionTitle: 'Séances planifiées',
+      sectionTitle: 'Cours effectifs',
     },
     enseignant: {
       kicker: 'Espace enseignant',
       title: 'Bonjour, Enseignant',
       description:
-        'Suivez uniquement vos séances, signatures de cahier et fiches de vacation.',
-      primaryAction: 'Signer un cahier',
+        'Suivez vos cours effectifs, vos pointages, vos cahiers clôturés et vos fiches de vacation.',
+      primaryAction: 'Remplir un cahier',
       primaryTarget: 'cahier',
-      sectionTitle: 'Mes prochaines séances',
+      sectionTitle: 'Mes cours effectifs',
     },
     delegue: {
       kicker: 'Espace délégué',
       title: 'Espace Délégué',
       description:
-        'Suivez votre classe, les pointages et les cahiers de texte à signer.',
-      primaryAction: 'Remplir un cahier',
+        'Suivez les cours effectifs de votre classe, les pointages et les cahiers à signer.',
+      primaryAction: 'Signer un cahier',
       primaryTarget: 'cahier',
-      sectionTitle: 'Planning de ma classe',
+      sectionTitle: 'Cours effectifs de ma classe',
     },
     surveillant: {
       kicker: 'Contrôle',
       title: 'Espace Surveillant',
       description:
-        'Contrôlez les présences, retards, absences et fiches à viser.',
+        'Contrôlez les cours effectifs, les retards, les absences et les cahiers ouverts.',
       primaryAction: 'Contrôler pointages',
       primaryTarget: 'qr',
-      sectionTitle: 'Séances à contrôler',
+      sectionTitle: 'Cours à contrôler',
     },
     comptable: {
       kicker: 'Finance',
@@ -589,7 +1079,7 @@ function getRoleConfig(role) {
         'Validez les fiches de vacation et suivez les paiements enseignants.',
       primaryAction: 'Voir vacations',
       primaryTarget: 'vacations',
-      sectionTitle: 'Séances liées aux vacations',
+      sectionTitle: 'Fiches récentes',
     },
   }
 
@@ -620,16 +1110,21 @@ function getScopeText(role, teacherName, delegateClass) {
   return 'Vue complète de l’activité académique'
 }
 
-function getRoleLabel(role) {
-  const labels = {
-    admin: 'Administrateur',
-    enseignant: 'Enseignant',
-    delegue: 'Délégué',
-    surveillant: 'Surveillant',
-    comptable: 'Comptable',
-  }
+function isTargetAllowed(target, permissions) {
+  const page = PAGE_TARGETS[target] || target
 
-  return labels[role] || 'Utilisateur'
+  if (page === 'dashboard') return true
+  if (page === 'emploi') return permissions.canGoSchedule
+  if (page === 'qr') return permissions.canGoQr
+  if (page === 'cahier') return permissions.canGoCahier
+  if (page === 'vacations') return permissions.canGoVacations
+  if (page === 'rapports') return permissions.canGoReports
+
+  return false
+}
+
+function sameId(a, b) {
+  return Number(a) === Number(b)
 }
 
 function formatShortMoney(value) {
@@ -644,6 +1139,29 @@ function formatShortMoney(value) {
   }
 
   return amount.toString()
+}
+
+function formatPointage(status) {
+  const labels = {
+    present: 'Présent',
+    retard: 'Retard',
+    absent: 'Absent',
+    non_pointe: 'Non pointé',
+  }
+
+  return labels[status] || status || 'Non pointé'
+}
+
+function formatVacationStatus(status) {
+  const labels = {
+    en_attente: 'En attente',
+    signee_enseignant: 'Signée enseignant',
+    visee: 'Visée',
+    validee: 'Validée',
+    payee: 'Payée',
+  }
+
+  return labels[status] || status || '—'
 }
 
 export default DynamicDashboard
